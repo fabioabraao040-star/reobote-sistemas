@@ -1,0 +1,200 @@
+---
+name: Executive Precision
+colors:
+  surface: '#f6faff'
+  surface-dim: '#d5dae0'
+  surface-bright: '#f6faff'
+  surface-container-lowest: '#ffffff'
+  surface-container-low: '#eff4fa'
+  surface-container: '#e9eef4'
+  surface-container-high: '#e4e9ef'
+  surface-container-highest: '#dee3e9'
+  on-surface: '#171c21'
+  on-surface-variant: '#4e4639'
+  inverse-surface: '#2b3136'
+  inverse-on-surface: '#ecf1f7'
+  outline: '#7f7667'
+  outline-variant: '#d1c5b4'
+  surface-tint: '#775a1b'
+  primary: '#775a1b'
+  on-primary: '#ffffff'
+  primary-container: '#c5a15b'
+  on-primary-container: '#4f3800'
+  inverse-primary: '#e8c178'
+  secondary: '#4f5f78'
+  on-secondary: '#ffffff'
+  secondary-container: '#d0e1ff'
+  on-secondary-container: '#53637d'
+  tertiary: '#4d6078'
+  on-tertiary: '#ffffff'
+  tertiary-container: '#94a8c3'
+  on-tertiary-container: '#2a3d54'
+  error: '#ba1a1a'
+  on-error: '#ffffff'
+  error-container: '#ffdad6'
+  on-error-container: '#93000a'
+  primary-fixed: '#ffdea4'
+  primary-fixed-dim: '#e8c178'
+  on-primary-fixed: '#261900'
+  on-primary-fixed-variant: '#5c4202'
+  secondary-fixed: '#d4e3ff'
+  secondary-fixed-dim: '#b7c7e5'
+  on-secondary-fixed: '#0a1c32'
+  on-secondary-fixed-variant: '#384860'
+  tertiary-fixed: '#d2e4ff'
+  tertiary-fixed-dim: '#b4c8e4'
+  on-tertiary-fixed: '#071d32'
+  on-tertiary-fixed-variant: '#35485f'
+  background: '#f6faff'
+  on-background: '#171c21'
+  surface-variant: '#dee3e9'
+typography:
+  display-lg:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 32px
+    fontWeight: '700'
+    lineHeight: 40px
+    letterSpacing: -0.02em
+  display-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 24px
+    fontWeight: '600'
+    lineHeight: 32px
+    letterSpacing: -0.015em
+  headline-lg:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 20px
+    fontWeight: '600'
+    lineHeight: 28px
+    letterSpacing: -0.01em
+  headline-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 16px
+    fontWeight: '600'
+    lineHeight: 24px
+    letterSpacing: -0.005em
+  body-lg:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 15px
+    fontWeight: '400'
+    lineHeight: 22px
+    letterSpacing: 0em
+  body-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 13px
+    fontWeight: '400'
+    lineHeight: 18px
+    letterSpacing: 0em
+  body-sm:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 12px
+    fontWeight: '400'
+    lineHeight: 16px
+    letterSpacing: 0.01em
+  label-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 13px
+    fontWeight: '600'
+    lineHeight: 16px
+    letterSpacing: 0.01em
+  label-sm:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 11px
+    fontWeight: '600'
+    lineHeight: 14px
+    letterSpacing: 0.04em
+  code-sm:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 12px
+    fontWeight: '500'
+    lineHeight: 16px
+    letterSpacing: 0em
+rounded:
+  sm: 0.125rem
+  DEFAULT: 0.25rem
+  md: 0.375rem
+  lg: 0.5rem
+  xl: 0.75rem
+  full: 9999px
+spacing:
+  gutter: 1rem
+  gutter-compact: 0.5rem
+  margin: 1.5rem
+  space-xs: 0.25rem
+  space-sm: 0.5rem
+  space-md: 0.75rem
+  space-lg: 1.25rem
+  space-xl: 2rem
+---
+
+## Brand & Style
+The design system targets high-efficiency customer experience teams, support supervisors, and enterprise operators managing multi-agent WhatsApp operations. It balances utilitarian workflow density with an elevated, boutique aesthetic—avoiding sterile enterprise software clichés while steering strictly clear of legal or formal bureaucratic associations.
+
+The aesthetic fuses modern SaaS minimalism with warm, deliberate detailing. Surfaces are crisp, light, and structured, relying on defined architectural planes, meticulous typography, and subtle metallic warmth to convey reliability, agility, and elite operational capability. The interaction paradigm emphasizes clarity under load, low cognitive friction during peak inbound volumes, and a calm, curated workspace.
+
+## Colors
+The palette leverages a structured slate-and-gold relationship over a cool, luminous foundation:
+
+- **Canvas & Base**: The default window backdrop sits at `#E8EDF3`, establishing an immediate optical separation from pure white operational cards (`#FFFFFF`).
+- **Primary Accent (`#C5A15B`)**: Reserved for high-intent actions, key focus rings, active navigation triggers, and meaningful status highlights. It must never overwhelm conversational workspaces.
+- **Deep Slate Navy (`#34445C`)**: The core anchor. Provides high-contrast, effortless legibility across all primary headings, interaction labels, and body text.
+- **Support Tones**:
+  - Muted Slate (`#5B6E87`): Secondary copy, meta indicators, timestamps, and input placeholders.
+  - Border Slate (`#D8E0EA`): Single-pixel dividers, structural grid boundaries, and resting control perimeters.
+  - Functional WhatsApp Status: Forest emerald (`#25D366`) is confined strictly to live channel status pings and verified session tags.
+
+## Typography
+Plus Jakarta Sans governs the entire typographic spectrum, providing geometric modernism with subtle humanist touches that keep data-dense conversational interfaces readable.
+
+- Apply tabular lining numbers across ticket counters, response duration timers, and analytics metrics to eliminate layout jitter.
+- Restrict `display-lg` to main analytical summary hubs and global system views.
+- Chat message payloads utilize `body-lg` for single-thread views and `body-md` for high-density multi-chat panels.
+- All micro-labels, badge counts, and column header classifications must use `label-sm` with slight tracking expansions (`0.04em`) to maintain legibility against muted backgrounds.
+
+## Layout & Spacing
+The layout operates as a high-density, multi-pane desktop command center tailored for 1440px+ displays, gracefully collapsing to single-pane flows on lower viewports:
+
+- **Global Structure**: A fixed 72px utility navigation bar flanks a 320px live conversation queue, an elastic central conversation viewport (flex-grow), and an optional 360px customer intelligence/CRM sidebar.
+- **Rhythm**: Built on a strict 4px/8px incremental grid. Standard intra-component padding employs `space-md` (12px), while outer margins between floating panel units leverage `space-lg` (20px).
+- **Responsive Adaptations**:
+  - Below 1280px: The CRM inspector transitions into an overlay drawer.
+  - Below 1024px: The conversation list and active chat switch to an alternating split-screen configuration with back navigation.
+
+## Elevation & Depth
+Depth is articulated via structured surface layering combined with low-opacity slate ambient shadowing, avoiding heavy drop shadows to preserve interface airiness:
+
+- **Level 0 (Canvas Base)**: `#E8EDF3` — un-elevated, grounding all secondary spaces.
+- **Level 1 (Working Cards & Panes)**: `#FFFFFF` surrounded by a continuous hairline outline (`1px solid #D8E0EA`) and a soft ambient shadow (`0 2px 8px -2px rgba(52, 68, 92, 0.05)`).
+- **Level 2 (Dropdowns, Popovers, & Quick-Action Trays)**: `#FFFFFF` bounded by `#D8E0EA` with focused projection (`0 10px 24px -4px rgba(52, 68, 92, 0.10)`).
+- **Level 3 (Modal Dialogs & Message Previews)**: `#FFFFFF` resting over a `#34445C` backdrop at 40% opacity, utilizing a soft-focus depth (`0 20px 32px -8px rgba(52, 68, 92, 0.16)`).
+
+## Shapes
+The system utilizes a refined "Soft" corner architecture (`roundedness: 1`), projecting precision and architectural discipline over casual roundness:
+
+- **Buttons, Inputs, and Badges**: 4px radius (`space-xs`) for crisp, non-distracting visual boundaries.
+- **Content Panels, Chat Bubbles, and Table Containers**: 8px radius (`rounded-lg`) to smoothly isolate conversation blocks without softening enterprise utility.
+- **Contextual Chips and Status Dots**: Strict pill geometries (fully rounded) are applied only to agent presence indicators, priority badges, and unread count markers.
+
+## Components
+
+### Buttons & Interactive Controls
+- **Primary Action**: Background `#C5A15B`, text `#FFFFFF`, no border. On hover, background shifts to a richer gold tone (`#B38E47`). Active state scales to 0.98.
+- **Secondary Action**: Background `#FFFFFF`, border `1px solid #D8E0EA`, text `#34445C`. Hover shifts background to `#E8EDF3`.
+- **Destructive/Critical**: Background transparent, border `1px solid #E27D60`, text `#D9534F`. Hover creates a light wash (`#FDF2F0`).
+
+### Input Fields & Conversation Composer
+- **Resting**: Height 40px (compact 34px for filters), background `#FFFFFF`, border `1px solid #D8E0EA`, text `#34445C`.
+- **Focus**: Border `#C5A15B` with an ambient glow (`box-shadow: 0 0 0 3px rgba(197, 161, 91, 0.15)`).
+- **Chat Input Tray**: Pinned bottom area within the active workspace, featuring integrated action buttons for templates, media attachments, and internal notes.
+
+### Message Bubbles
+- **Customer Bubble**: Inbound messages render in `#FFFFFF`, border `1px solid #D8E0EA`, aligned left with typography `#34445C`.
+- **Agent Bubble**: Outbound messages render in `#34445C` with text `#FFFFFF` and muted timestamp `#D8E0EA`, aligned right.
+- **Internal Note Bubble**: Subtle pale amber `#FCF9F2` with a `1px dashed #C5A15B` perimeter, spans full width with an agent lock identifier.
+
+### Chips & Priority Markers
+- **WhatsApp Tags**: Inset pills with borderless pale fills (`rgba(52, 68, 92, 0.06)`), text `#34445C`, 11px uppercase label styling.
+- **Urgent SLA Badge**: `#C5A15B` fill at 12% opacity with solid text `#8C6E2D`, communicating priority without alarm fatigue.
+
+### Tables & List Rows
+- **List Items (Conversation Queue)**: Separated by a `1px solid #D8E0EA` border. Active conversation row receives an inset left border (`3px solid #C5A15B`) and a crisp `#FFFFFF` background against the `#E8EDF3` stack.
