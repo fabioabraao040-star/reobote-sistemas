@@ -29,6 +29,7 @@ interface AuthContextType {
   isUser: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (data: { name: string; email: string; password: string; companyId?: string }) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
 }
@@ -96,6 +97,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await api.register(data);
   };
 
+  const resetPassword = async (email: string) => {
+    await api.resetPassword(email);
+  };
+
   const logout = async () => {
     try {
       await api.logout();
@@ -114,7 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isUser = user?.role === 'user';
 
   return (
-    <AuthContext.Provider value={{ user, isAdmin, isUser, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, isAdmin, isUser, login, register, resetPassword, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

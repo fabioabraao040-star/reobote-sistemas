@@ -1,18 +1,56 @@
 import express, { Request, Response, NextFunction } from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+// O webhook da Meta exige o corpo bruto (Buffer) para validar a assinatura HMAC.
+// Precisa ser registrado ANTES do express.json(), que consumiria o corpo.
+app.use('/api/webhook/whatsapp', express.raw({ type: 'application/json' }));
 
 app.use(express.json());
+
+// ============================================================================
+// SEGURANÇA DO SERVIDOR
+// ============================================================================
+
+// CORS com origens permitidas (configurável via variável de ambiente)
+const corsOrigins = process.env.CORS_ORIGINS || 'http://localhost:3000';
+app.use(cors({
+  origin: corsOrigins.split(',').map(s => s.trim()),
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+}));
+
+// Headers de segurança com Helmet
+app.use(helmet());
+app.use(helmet.crossOriginResourcePolicy({ policy: 'cross-origin' }));
+
+// Rate limiting geral para API
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100, // máximo 100 requisições por IP por janela de 15 min
+  message: { error: 'Muitas requisições. Tente novamente mais tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', apiLimiter);
+
+// Rate limiting mais rígido para rotas de autenticação
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 10, // máximo 10 tentativas por IP por janela de 15 min
+  message: { error: 'Muitas tentativas de autenticação. Tente novamente mais tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/auth/', authLimiter);
 
 // ============================================================================
 // SUPABASE CLIENT (SOMENTE BACKEND)
@@ -435,7 +473,33 @@ app.get('/api/webhook/whatsapp', async (req, res) => {
 });
 
 // Webhook Oficial da Meta (Recebimento de Eventos POST)
-app.post('/api/webhook/whatsapp', (req, res) => {
+app.post('/api/webhook/whatsapp', async (req, res) => {
+  const signature = req.headers['x-hub-signature-256'];
+
+  if (!supabase) {
+    return res.status(500).send('Erro interno.');
+  }
+
+  if (!signature) {
+    return res.status(401).send('Assinatura ausente.');
+  }
+
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret) {
+    console.error('[Webhook] WHATSAPP_APP_SECRET não configurado.');
+    return res.status(500).send('Erro interno.');
+  }
+
+  // Validar assinatura HMAC-SHA256 da Meta
+  const hmac = crypto.createHmac('sha256', appSecret);
+  hmac.update(req.body);
+  const expectedSignature = `sha256=${hmac.digest('hex')}`;
+
+  const sig = String(signature);
+  if (sig.length !== expectedSignature.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSignature))) {
+    return res.status(401).send('Assinatura inválida.');
+  }
+
   const body = req.body;
 
   if (body.object === 'whatsapp_business_account') {
@@ -1409,31 +1473,39 @@ app.post('/api/auth/register', async (req, res) => {
   });
 });
 
+// Reset de senha por e-mail (Supabase Auth)
+app.post('/api/auth/reset-password', async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase não configurado.' });
+  }
+
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'E-mail é obrigatório.' });
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo: `${process.env.APP_URL || 'http://localhost:3000'}/reset-password`,
+  });
+
+  if (error) {
+    return res.status(400).json({ error: error.message || 'Erro ao solicitar recuperação de senha.' });
+  }
+
+  res.json({
+    success: true,
+    message: 'Se o e-mail estiver cadastrado, você receberá instruções para redefinir sua senha.',
+  });
+});
+
 // ============================================================================
 // INTEGRAÇÃO COM VITE (DEV) E ARQUIVOS ESTÁTICOS (PRODUÇÃO)
 // ============================================================================
 
-async function startServer() {
-  const isProd = process.env.NODE_ENV === 'production';
+// Rotas /api não encontradas devem responder JSON (nunca o HTML do SPA)
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Rota da API não encontrada.' });
+});
 
-  if (!isProd) {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, () => {
-    console.log(`[REOBOTE SERVER] Servidor full-stack rodando em http://localhost:${PORT}`);
-  });
-}
-
-startServer();
+// Exportado para uso local (dev-server.ts) e como função serverless na Vercel.
+export default app;

@@ -54,6 +54,17 @@ export const api = {
     return data;
   },
 
+  async resetPassword(email: string) {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao solicitar recuperação de senha.');
+    return data;
+  },
+
   // WhatsApp Meta Oficial
   async getWhatsAppConfig() {
     const res = await fetch('/api/whatsapp/config', { headers: getAuthHeaders() });
