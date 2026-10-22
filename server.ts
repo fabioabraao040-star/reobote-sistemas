@@ -1587,6 +1587,128 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // INTEGRAÇÃO COM VITE (DEV) E ARQUIVOS ESTÁTICOS (PRODUÇÃO)
 // ============================================================================
 
+// ============================================================================
+// DIAGNÓSTICO TEMPORÁRIO (removido após a validação)
+// ============================================================================
+app.get('/api/diag', async (req, res) => {
+  const expected = process.env.DIAG_TOKEN || '';
+  const provided = req.header('x-diag-token') || '';
+  const ok =
+    expected.length > 0 &&
+    provided.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+
+  if (!ok) {
+    return res.status(404).json({ error: 'Rota da API não encontrada.' });
+  }
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase não configurado (SUPABASE_URL/SERVICE_ROLE ausentes).' });
+  }
+
+  const supaUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const rest = await fetch(`${supaUrl}/rest/v1/`, {
+    headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` },
+  });
+  const body: any = await rest.json().catch(() => ({}));
+  const schemas = body?.components?.schemas || body?.definitions || {};
+  const tables: string[] = Object.keys(schemas).sort();
+
+  const counts: Record<string, number | null> = {};
+  for (const t of tables) {
+    const cr = await fetch(`${supaUrl}/rest/v1/${t}?select=*`, {
+      method: 'HEAD',
+      headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Prefer: 'count=exact' },
+    });
+    const range = cr.headers.get('content-range') || '';
+    counts[t] = range.includes('/') ? Number(range.split('/')[1]) : null;
+  }
+
+  return res.json({
+    host: supaUrl.replace(/^https?:\/\//, ''),
+    restStatus: rest.status,
+    restError: rest.ok ? null : body?.message || body?.hint || body?.error || null,
+    tables,
+    counts,
+    hasCompanies: tables.includes('companies'),
+  });
+});
+
+// Cria o ADM real (temporário, protegido pelo mesmo token)
+app.post('/api/diag/create-admin', async (req, res) => {
+  const expected = process.env.DIAG_TOKEN || '';
+  const provided = req.header('x-diag-token') || '';
+  const ok =
+    expected.length > 0 &&
+    provided.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+
+  if (!ok) {
+    return res.status(404).json({ error: 'Rota da API não encontrada.' });
+  }
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase não configurado.' });
+  }
+
+  const { email, password, name, companyName } = req.body || {};
+  if (!email || !password || !name) {
+    return res.status(400).json({ error: 'Informe email, password e name.' });
+  }
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'A senha precisa ter no mínimo 8 caracteres.' });
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+
+  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    email: normalizedEmail,
+    password: String(password),
+    email_confirm: true,
+    user_metadata: { name: String(name).trim(), role: 'admin' },
+  });
+
+  if (authError || !authData.user) {
+    return res.status(400).json({ error: authError?.message || 'Erro ao criar login.' });
+  }
+
+  const { data: company, error: companyError } = await supabase
+    .from('companies')
+    .insert({ name: String(companyName || 'Reobote').trim() })
+    .select('id, name')
+    .single();
+
+  if (companyError || !company) {
+    await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+    return res.status(500).json({ error: companyError?.message || 'Erro ao criar empresa.' });
+  }
+
+  const { error: profileError } = await supabase.from('users').insert({
+    id: authData.user.id,
+    company_id: company.id,
+    name: String(name).trim(),
+    email: normalizedEmail,
+    role: 'admin',
+    status: 'offline',
+  });
+
+  if (profileError) {
+    await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+    await supabase.from('companies').delete().eq('id', company.id);
+    return res.status(500).json({ error: profileError.message || 'Erro ao criar perfil ADM.' });
+  }
+
+  return res.status(201).json({
+    ok: true,
+    email: normalizedEmail,
+    userId: authData.user.id,
+    companyId: company.id,
+    companyName: company.name,
+    role: 'admin',
+  });
+});
+
 // Rotas /api não encontradas devem responder JSON (nunca o HTML do SPA)
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Rota da API não encontrada.' });
