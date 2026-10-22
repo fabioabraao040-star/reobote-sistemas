@@ -1587,6 +1587,123 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // INTEGRAÇÃO COM VITE (DEV) E ARQUIVOS ESTÁTICOS (PRODUÇÃO)
 // ============================================================================
 
+// ============================================================================
+// LIMPEZA TEMPORÁRIA DE DADOS DEMO/TESTE (protegida por token, removida depois)
+// ============================================================================
+app.post('/api/admin/cleanup-demo', async (req, res) => {
+  const expected = process.env.CLEANUP_TOKEN || '';
+  const provided = req.header('x-cleanup-token') || '';
+  const tokenOk =
+    expected.length > 0 &&
+    provided.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+
+  if (!tokenOk) {
+    return res.status(404).json({ error: 'Rota da API não encontrada.' });
+  }
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Supabase não configurado.' });
+  }
+
+  const apply = req.query.apply === '1';
+  const demoRe = /demo|teste|test/i;
+  const isDemoUser = (u: any) => demoRe.test(`${u.name || ''} ${u.email || ''}`);
+  const isDemoCompany = (c: any) => demoRe.test(`${c.name || ''} ${c.cnpj || ''}`);
+
+  const { data: companies, error: cErr } = await supabase
+    .from('companies')
+    .select('id, name, cnpj, created_at')
+    .order('created_at');
+
+  const { data: users, error: uErr } = await supabase
+    .from('users')
+    .select('id, company_id, name, email, role, created_at')
+    .order('created_at');
+
+  if (cErr || uErr) {
+    return res.status(500).json({ error: cErr?.message || uErr?.message });
+  }
+
+  const authUsers: any[] = [];
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) return res.status(500).json({ error: error.message });
+    authUsers.push(...(data?.users || []));
+    if (!data?.users || data.users.length < 1000) break;
+  }
+
+  const profileIds = new Set((users || []).map((u) => u.id));
+  const companiesById = new Map((companies || []).map((c) => [c.id, c]));
+  const authOnly = authUsers.filter((a) => !profileIds.has(a.id));
+  const demoUsers = (users || []).filter(isDemoUser);
+  const demoCompanies = (companies || []).filter(
+    (c) => isDemoCompany(c) || (users || []).some((u) => u.company_id === c.id && isDemoUser(u))
+  );
+
+  const report = {
+    companies: (companies || []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      demo: isDemoCompany(c),
+      users: (users || []).filter((u) => u.company_id === c.id).length,
+    })),
+    users: (users || []).map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      company: companiesById.get(u.company_id)?.name || null,
+      demo: isDemoUser(u),
+    })),
+    provisionalAuthWithoutProfile: authOnly.map((a) => ({ id: a.id, email: a.email, created_at: a.created_at })),
+    demoUsers: demoUsers.map((u) => u.email),
+    demoCompanies: demoCompanies.map((c) => ({ id: c.id, name: c.name })),
+  };
+
+  if (!apply) {
+    return res.json({ mode: 'list', ...report });
+  }
+
+  let removedAuth = 0;
+  let removedProfiles = 0;
+  let removedCompanies = 0;
+
+  // 1) Contas de login sem perfil (usuários provisórios que não conseguem entrar)
+  for (const a of authOnly) {
+    const { error } = await supabase.auth.admin.deleteUser(a.id);
+    if (!error) removedAuth += 1;
+  }
+
+  // 2) Perfis demo/teste + conta de login correspondente
+  for (const u of demoUsers) {
+    const { error: authErr } = await supabase.auth.admin.deleteUser(u.id);
+    if (!authErr) removedAuth += 1;
+
+    const { error: dbErr } = await supabase.from('users').delete().eq('id', u.id);
+    if (!dbErr) removedProfiles += 1;
+  }
+
+  // 3) Empresas demo que ficaram sem usuários reais
+  const { data: remaining } = await supabase.from('users').select('id, company_id');
+  const remainingByCompany = new Map<string, number>();
+  for (const u of remaining || []) {
+    if (!u.company_id) continue;
+    remainingByCompany.set(u.company_id, (remainingByCompany.get(u.company_id) || 0) + 1);
+  }
+
+  for (const c of demoCompanies) {
+    if ((remainingByCompany.get(c.id) || 0) > 0) continue;
+    const { error } = await supabase.from('companies').delete().eq('id', c.id);
+    if (!error) removedCompanies += 1;
+  }
+
+  return res.json({
+    mode: 'apply',
+    removed: { authAccounts: removedAuth, profiles: removedProfiles, companies: removedCompanies },
+  });
+});
+
 // Rotas /api não encontradas devem responder JSON (nunca o HTML do SPA)
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Rota da API não encontrada.' });
