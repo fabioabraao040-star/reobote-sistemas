@@ -679,11 +679,41 @@ app.post('/api/users', authMiddleware, adminOnlyMiddleware, async (req: Authenti
     return res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
   }
 
+  const targetCompanyIdRaw: string | null =
+    typeof companyId === 'string' && companyId.trim() ? companyId.trim() : req.authCompanyId || null;
+
+  // ADM global (sem empresa) usa a primeira unidade existente; sem unidade, pede para criar
+  let targetCompanyId = targetCompanyIdRaw;
+  if (!targetCompanyId) {
+    const { data: firstCompany } = await supabase
+      .from('companies')
+      .select('id')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    targetCompanyId = firstCompany?.id || null;
+  }
+
+  // Sem empresa o atendente ficaria órfão e quebraria as consultas
+  if (!targetCompanyId) {
+    return res.status(400).json({ error: 'Nenhuma empresa cadastrada. Crie uma unidade antes de adicionar usuários.' });
+  }
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetCompanyId)) {
+    return res.status(400).json({ error: 'Empresa inválida.' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
   const { data: existing, error: fetchError } = await supabase
     .from('users')
     .select('id')
-    .ilike('email', email.trim())
+    .ilike('email', normalizedEmail)
     .limit(1);
+
+  if (fetchError) {
+    return res.status(500).json({ error: 'Erro ao verificar e-mail.' });
+  }
 
   if (existing && existing.length > 0) {
     return res.status(400).json({ error: 'Este e-mail já está cadastrado no sistema.' });
@@ -691,14 +721,33 @@ app.post('/api/users', authMiddleware, adminOnlyMiddleware, async (req: Authenti
 
   // Não permite criar admin via cadastro público; apenas admin pode criar admin
   const userRole = role === 'admin' ? 'admin' : 'user';
-  const targetCompanyId = companyId || req.authCompanyId;
+
+  // Cria a conta de login junto com o perfil. Sem isso o atendente
+  // ficava apenas na tabela users e não conseguia entrar no sistema.
+  const temporaryPassword = `Rb!${crypto.randomBytes(6).toString('hex')}`;
+  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    email: normalizedEmail,
+    password: temporaryPassword,
+    email_confirm: true,
+    user_metadata: { name: name.trim(), company_id: targetCompanyId },
+  });
+
+  if (authError || !authData.user) {
+    const alreadyExists = /already|registered|exists/i.test(authError?.message || '');
+    return res.status(alreadyExists ? 409 : 500).json({
+      error: alreadyExists
+        ? 'Este e-mail já possui conta de acesso. Edite o usuário existente ou redefina a senha.'
+        : authError?.message || 'Erro ao criar conta de acesso.',
+    });
+  }
 
   const { data, error } = await supabase
     .from('users')
     .insert({
+      id: authData.user.id,
       company_id: targetCompanyId,
       name: name.trim(),
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       role: userRole,
       status: 'offline',
     })
@@ -706,10 +755,12 @@ app.post('/api/users', authMiddleware, adminOnlyMiddleware, async (req: Authenti
     .single();
 
   if (error) {
+    // Remove a conta de login para não deixar usuário provisório sem perfil
+    await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
     return res.status(500).json({ error: 'Erro ao criar usuário.' });
   }
 
-  res.status(201).json(data);
+  res.status(201).json({ ...data, temporaryPassword });
 });
 
 app.put('/api/users/:id', authMiddleware, adminOnlyMiddleware, async (req: AuthenticatedRequest, res) => {
@@ -763,6 +814,9 @@ app.delete('/api/users/:id', authMiddleware, adminOnlyMiddleware, async (req: Au
   if (fetchError || !existing) {
     return res.status(404).json({ error: 'Usuário não encontrado.' });
   }
+
+  // Remove também a conta de login, evitando "usuário provisório" sem perfil
+  await supabase.auth.admin.deleteUser(req.params.id).catch(() => {});
 
   const { error } = await supabase.from('users').delete().eq('id', req.params.id);
 
@@ -1434,6 +1488,14 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ error: 'A senha deve conter no mínimo 6 caracteres.' });
   }
 
+  // Empresa informada precisa ser um UUID válido ('' quebrava a coluna UUID)
+  let targetCompanyId: string | null =
+    typeof companyId === 'string' && companyId.trim() ? companyId.trim() : null;
+
+  if (targetCompanyId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetCompanyId)) {
+    return res.status(400).json({ error: 'Empresa inválida.' });
+  }
+
   // Cadastro público cria apenas usuário com role 'user', nunca 'admin'
   const { data, error } = await supabase.auth.signUp({
     email: email.trim().toLowerCase(),
@@ -1441,7 +1503,7 @@ app.post('/api/auth/register', async (req, res) => {
     options: {
       data: {
         name: name.trim(),
-        company_id: companyId || '',
+        company_id: targetCompanyId || '',
       },
     },
   });
@@ -1450,10 +1512,30 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ error: error?.message || 'Erro ao cadastrar usuário.' });
   }
 
+  let createdCompanyId: string | null = null;
+
+  // Sem empresa informada, cria automaticamente a unidade do usuário.
+  // Nunca gravar '' em coluna UUID (era a causa do erro no banco).
+  if (!targetCompanyId) {
+    const { data: newCompany, error: companyError } = await supabase
+      .from('companies')
+      .insert({ name: `${name.trim()} — Unidade` })
+      .select('id')
+      .single();
+
+    if (companyError || !newCompany) {
+      await supabase.auth.admin.deleteUser(data.user.id).catch(() => {});
+      return res.status(500).json({ error: 'Erro ao criar unidade do usuário.' });
+    }
+
+    targetCompanyId = newCompany.id;
+    createdCompanyId = newCompany.id;
+  }
+
   // Cria registro na tabela users
   const { error: insertError } = await supabase.from('users').insert({
     id: data.user.id,
-    company_id: companyId || '',
+    company_id: targetCompanyId,
     name: name.trim(),
     email: email.trim().toLowerCase(),
     role: 'user',
@@ -1461,8 +1543,11 @@ app.post('/api/auth/register', async (req, res) => {
   });
 
   if (insertError) {
-    // Tenta limpar o usuário do auth se falhar na tabela users
+    // Desfaz auth e empresa criada para não deixar usuário provisório órfão
     await supabase.auth.admin.deleteUser(data.user.id).catch(() => {});
+    if (createdCompanyId) {
+      await supabase.from('companies').delete().eq('id', createdCompanyId);
+    }
     return res.status(500).json({ error: 'Erro ao criar perfil de usuário.' });
   }
 

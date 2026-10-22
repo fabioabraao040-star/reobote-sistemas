@@ -83,11 +83,16 @@ export default function Atendentes() {
         setSuccessMessage('Atendente atualizado com sucesso!');
       } else {
         const created = await api.createUser({ name, email, role });
-        setUsers((prev) => [...prev, created]);
-        setSuccessMessage('Novo atendente cadastrado na equipe!');
+        const { temporaryPassword, ...newUser } = created;
+        setUsers((prev) => [...prev, newUser]);
+        setSuccessMessage(
+          temporaryPassword
+            ? `Atendente criado! Senha provisória: ${temporaryPassword} — anote e entregue ao atendente (ele deve trocar no primeiro acesso).`
+            : 'Novo atendente cadastrado na equipe!'
+        );
       }
       setShowModal(false);
-      setTimeout(() => setSuccessMessage(null), 4000);
+      setTimeout(() => setSuccessMessage(null), 15000);
     } catch (err: any) {
       setFormError(err.message || 'Erro ao salvar atendente.');
     } finally {
