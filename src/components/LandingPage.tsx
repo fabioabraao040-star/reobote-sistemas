@@ -1,6 +1,4 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 
 const btnStyle = {
   background:
@@ -15,23 +13,6 @@ const btnStyle = {
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-
-  const handleAdminAccess = () => {
-    if (user) {
-      navigate('/dashboard');
-    } else {
-      navigate('/login?role=admin');
-    }
-  };
-
-  const handleAttendantAccess = () => {
-    if (user) {
-      navigate('/dashboard');
-    } else {
-      navigate('/login?role=user');
-    }
-  };
 
   return (
     <div className="bg-surface min-h-screen relative selection:bg-primary-container selection:text-on-primary-container font-body-md text-on-surface">
@@ -144,84 +125,27 @@ export default function LandingPage() {
               </p>
             </div>
 
-            {/* Access buttons */}
-            <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-              {/* ADMINISTRADOR */}
-              <button className="group relative w-full text-left rounded-xl transition-all duration-300 ease-out transform hover:-translate-y-1 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/60 overflow-hidden p-4 sm:p-6 flex flex-col justify-between z-10" style={btnStyle} onClick={handleAdminAccess}>
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-b from-[#293647] to-[#0f1c2c] p-[1px] shadow-[0_4px_16px_rgba(0,0,0,0.5),0_0_12px_rgba(201,174,105,0.25)] flex items-center justify-center group-hover:shadow-[0_0_20px_rgba(230,201,130,0.5)] transition-all duration-300">
-                      <div className="w-full h-full rounded-xl bg-gradient-to-b from-[#17374A] to-[#0d1e2b] flex items-center justify-center border-t border-[#fee096]/50 shadow-inner">
-                        <span className="material-symbols-outlined text-primary text-[28px] drop-shadow-[0_0_12px_rgba(230,201,130,0.7)]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                          admin_panel_settings
-                        </span>
-                      </div>
-                    </div>
-                    <span className="font-mono text-xs text-primary uppercase px-2 py-0.5 rounded-full bg-[#132030]/90 border border-primary/40 shadow-[0_0_10px_rgba(201,174,105,0.15)] font-medium tracking-wider">
-                      Nível Sênior
-                    </span>
+            {/* Acesso ao sistema */}
+            <div className="w-full max-w-md">
+              <button
+                className="group relative w-full rounded-xl transition-all duration-300 ease-out transform hover:-translate-y-1 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/60 overflow-hidden p-4 sm:p-5 flex items-center justify-between gap-4 z-10"
+                style={btnStyle}
+                onClick={() => navigate("/login")}
+              >
+                <div className="relative z-10 flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-b from-[#17374A] to-[#0d1e2b] flex items-center justify-center border-t border-[#fee096]/50 shadow-inner">
+                    <span className="material-symbols-outlined text-primary text-[24px]">login</span>
                   </div>
-                  <div className="space-y-1 mb-4">
-                    <span className="font-mono text-xs uppercase tracking-widest text-primary-container font-medium block drop-shadow-sm">
-                      Privilégio Mestre
+                  <div className="text-left">
+                    <span className="font-mono text-xs uppercase tracking-widest text-primary-container block">
+                      Acesso Seguro
                     </span>
-                    <h2 className="font-headline-md sm:text-[24px] font-semibold text-on-surface tracking-tight group-hover:text-primary transition-colors duration-200 drop-shadow-sm">
-                      ADMINISTRADOR
-                    </h2>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant pt-1 leading-relaxed">
-                      Gestão global, parametrizações e controle operacional.
-                    </p>
-                  </div>
-                </div>
-                <div className="relative z-10 pt-2 border-t border-primary/20 flex items-center justify-between text-primary">
-                  <span className="font-mono text-xs font-semibold tracking-wider uppercase group-hover:text-primary-fixed transition-colors">
-                    Inicializar Painel
-                  </span>
-                  <div className="w-9 h-9 rounded-full bg-surface-container-low border border-primary/30 flex items-center justify-center group-hover:bg-primary group-hover:text-on-primary group-hover:shadow-[0_0_16px_rgba(230,201,130,0.6)] transition-all duration-300 shadow-md">
-                    <span className="material-symbols-outlined text-[18px] transform group-hover:translate-x-0.5 transition-transform">
-                      arrow_forward
+                    <span className="font-headline-md text-[20px] font-semibold text-on-surface group-hover:text-primary transition-colors">
+                      Entrar no Sistema
                     </span>
                   </div>
                 </div>
-              </button>
-
-              {/* USUÁRIO / ATENDENTE */}
-              <button className="group relative w-full text-left rounded-xl transition-all duration-300 ease-out transform hover:-translate-y-1 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/60 overflow-hidden p-4 sm:p-6 flex flex-col justify-between z-10" style={btnStyle} onClick={handleAttendantAccess}>
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-b from-[#293647] to-[#0f1c2c] p-[1px] shadow-[0_4px_16px_rgba(0,0,0,0.5),0_0_12px_rgba(201,174,105,0.2)] flex items-center justify-center group-hover:shadow-[0_0_20px_rgba(230,201,130,0.5)] transition-all duration-300">
-                      <div className="w-full h-full rounded-xl bg-gradient-to-b from-[#17374A] to-[#0d1e2b] flex items-center justify-center border-t border-[#fee096]/50 shadow-inner">
-                        <span className="material-symbols-outlined text-primary text-[28px] drop-shadow-[0_0_12px_rgba(230,201,130,0.7)]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                          headset_mic
-                        </span>
-                      </div>
-                    </div>
-                    <span className="font-mono text-xs text-secondary uppercase px-2 py-0.5 rounded-full bg-[#132030]/90 border border-secondary/40 shadow-[0_0_10px_rgba(171,202,226,0.15)] font-medium tracking-wider">
-                      Operacional
-                    </span>
-                  </div>
-                  <div className="space-y-1 mb-4">
-                    <span className="font-mono text-xs uppercase tracking-widest text-secondary font-medium block drop-shadow-sm">
-                      Fila de Trabalho
-                    </span>
-                    <h2 className="font-headline-md sm:text-[24px] font-semibold text-on-surface tracking-tight group-hover:text-primary transition-colors duration-200 drop-shadow-sm">
-                      USUÁRIO / ATENDENTE
-                    </h2>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant pt-1 leading-relaxed">
-                      Acesso rápido ao fluxo de atendimento e operações diárias.
-                    </p>
-                  </div>
-                </div>
-                <div className="relative z-10 pt-2 border-t border-primary/20 flex items-center justify-between text-primary">
-                  <span className="font-mono text-xs font-semibold tracking-wider uppercase group-hover:text-primary-fixed transition-colors">
-                    Acessar Fila
-                  </span>
-                  <div className="w-9 h-9 rounded-full bg-surface-container-low border border-primary/30 flex items-center justify-center group-hover:bg-primary group-hover:text-on-primary group-hover:shadow-[0_0_16px_rgba(230,201,130,0.6)] transition-all duration-300 shadow-md">
-                    <span className="material-symbols-outlined text-[18px] transform group-hover:translate-x-0.5 transition-transform">
-                      arrow_forward
-                    </span>
-                  </div>
-                </div>
+                <span className="material-symbols-outlined text-primary relative z-10">arrow_forward</span>
               </button>
             </div>
 
