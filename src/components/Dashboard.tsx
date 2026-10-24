@@ -47,12 +47,12 @@ export default function Dashboard() {
     phoneNumber?: string;
     phoneNumberId?: string;
     wabaId?: string;
-    maskedToken?: string;
     verifiedName?: string;
     webhookUrl?: string;
-    verifyToken?: string;
     qualityRating?: string;
     lastChecked?: string;
+    hasAccessToken?: boolean;
+    hasVerifyToken?: boolean;
   }>({ connected: false });
 
   const [attendantStats, setAttendantStats] = useState<{
@@ -123,17 +123,20 @@ export default function Dashboard() {
           phoneNumber: wa.phoneNumber,
           phoneNumberId: wa.phoneNumberId,
           wabaId: wa.wabaId,
-          maskedToken: wa.maskedToken,
           verifiedName: wa.verifiedName,
           webhookUrl: wa.webhookUrl,
-          verifyToken: wa.verifyToken,
           qualityRating: wa.qualityRating,
           lastChecked: wa.lastChecked,
+          hasAccessToken: Boolean(wa.hasAccessToken),
+          hasVerifyToken: Boolean(wa.hasVerifyToken),
         });
         setCfgPhone(wa.phoneNumber || '');
         setCfgPhoneId(wa.phoneNumberId || '');
         setCfgWabaId(wa.wabaId || '');
-        setCfgVerifyToken(wa.verifyToken || '');
+        // Segredos nunca são recarregados para a tela: os campos ficam vazios
+        // e só são enviados quando o administrador digitar um novo valor.
+        setCfgToken('');
+        setCfgVerifyToken('');
       } else {
         const stats = await api.getAttendantStats();
         setAttendantStats(stats);
@@ -154,10 +157,13 @@ export default function Dashboard() {
         phoneNumber: cfgPhone,
         phoneNumberId: cfgPhoneId,
         wabaId: cfgWabaId,
-        accessToken: cfgToken.trim() ? cfgToken : undefined,
-        verifyToken: cfgVerifyToken,
+        accessToken: cfgToken.trim() ? cfgToken.trim() : undefined,
+        verifyToken: cfgVerifyToken.trim() ? cfgVerifyToken.trim() : undefined,
       });
       setModalFeedback({ type: 'success', message: res.message || 'Configurações salvas no servidor.' });
+      // Limpa os segredos do formulário imediatamente após salvar.
+      setCfgToken('');
+      setCfgVerifyToken('');
       loadData();
     } catch (err: any) {
       setModalFeedback({ type: 'error', message: err.message || 'Erro ao salvar configuração do WhatsApp.' });
@@ -380,12 +386,32 @@ export default function Dashboard() {
               </div>
               <div>
                 <label className="font-semibold text-[#F5F2EA] block mb-1">Token de Acesso do Desenvolvedor Meta (System User Token)</label>
-                <input type="password" value={cfgToken} onChange={(e) => setCfgToken(e.target.value)} placeholder={whatsappInfo.maskedToken || 'Cole aqui o token de acesso da Meta...'} className="w-full px-3 py-2 rounded border border-[#2B3D50] text-[#F5F2EA] font-mono text-xs outline-none focus:border-[#C9AE69]" />
-                <span className="text-[10px] text-[#A0B0BA] mt-0.5 block">Segredo armazenado exclusivamente no servidor backend. Nunca exposto ao navegador.</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={cfgToken}
+                  onChange={(e) => setCfgToken(e.target.value)}
+                  placeholder={whatsappInfo.hasAccessToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado — cole aqui o token da Meta'}
+                  className="w-full px-3 py-2 rounded border border-[#2B3D50] text-[#F5F2EA] font-mono text-xs outline-none focus:border-[#C9AE69]"
+                />
+                <span className={`text-[10px] mt-0.5 block ${whatsappInfo.hasAccessToken ? 'text-[#39AC6B]' : 'text-[#A0B0BA]'}`}>
+                  {whatsappInfo.hasAccessToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado'}
+                  {' · '}Segredo armazenado exclusivamente no servidor, nunca exibido no navegador.
+                </span>
               </div>
               <div>
                 <label className="font-semibold text-[#F5F2EA] block mb-1">Token de Verificação do Webhook (Verify Token)</label>
-                <input type="text" value={cfgVerifyToken} onChange={(e) => setCfgVerifyToken(e.target.value)} placeholder="Token configurado no painel da Meta" className="w-full px-3 py-2 rounded border border-[#2B3D50] text-[#F5F2EA] font-mono text-xs outline-none focus:border-[#C9AE69]" />
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={cfgVerifyToken}
+                  onChange={(e) => setCfgVerifyToken(e.target.value)}
+                  placeholder={whatsappInfo.hasVerifyToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado — token definido no painel da Meta'}
+                  className="w-full px-3 py-2 rounded border border-[#2B3D50] text-[#F5F2EA] font-mono text-xs outline-none focus:border-[#C9AE69]"
+                />
+                <span className={`text-[10px] mt-0.5 block ${whatsappInfo.hasVerifyToken ? 'text-[#39AC6B]' : 'text-[#A0B0BA]'}`}>
+                  {whatsappInfo.hasVerifyToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado'}
+                </span>
               </div>
               {whatsappInfo.webhookUrl && (
                 <div className="p-3 bg-[#101D2D] border border-[#2B3D50] rounded-lg">

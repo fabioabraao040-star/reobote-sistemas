@@ -107,13 +107,12 @@ export const api = {
         phoneNumber: null,
         phoneNumberId: null,
         wabaId: null,
-        maskedToken: '',
         verifiedName: null,
         webhookUrl: '',
-        verifyToken: '',
         qualityRating: null,
         lastChecked: null,
         hasAccessToken: false,
+        hasVerifyToken: false,
       };
     }
     const data = await parseJson(res);

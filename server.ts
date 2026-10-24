@@ -270,10 +270,10 @@ app.get('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req,
     phoneNumber: config.phone_number,
     phoneNumberId: config.phone_number_id,
     wabaId: config.waba_id,
-    verifyToken: config.verify_token,
     isVerified: config.is_verified,
+    // Apenas indicadores — nunca devolver tokens (nem mascarados) ao navegador.
     hasAccessToken: Boolean(config.access_token && config.access_token.trim().length > 0),
-    maskedToken: config.access_token ? `${config.access_token.slice(0, 6)}••••••••${config.access_token.slice(-4)}` : '',
+    hasVerifyToken: Boolean(config.verify_token && config.verify_token.trim().length > 0),
     verifiedName: config.verified_name,
     qualityRating: config.quality_rating,
     lastChecked: config.last_health_check,
@@ -298,6 +298,11 @@ app.post('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req
     .limit(1)
     .single();
 
+  // Segredos só são atualizados quando chegam preenchidos; vazio/ausente
+  // preserva a credencial já armazenada (edição sem reenviar o token).
+  const newAccessToken = typeof accessToken === 'string' && accessToken.trim() ? accessToken.trim() : null;
+  const newVerifyToken = typeof verifyToken === 'string' && verifyToken.trim() ? verifyToken.trim() : null;
+
   if (existing) {
     const { error: updateError } = await supabase
       .from('whatsapp_configs')
@@ -305,8 +310,8 @@ app.post('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req
         phone_number: phoneNumber.trim(),
         phone_number_id: phoneNumberId.trim(),
         waba_id: wabaId.trim(),
-        ...(verifyToken ? { verify_token: verifyToken.trim() } : {}),
-        ...(accessToken && accessToken.trim() ? { access_token: accessToken.trim() } : {}),
+        ...(newVerifyToken ? { verify_token: newVerifyToken } : {}),
+        ...(newAccessToken ? { access_token: newAccessToken } : {}),
         is_verified: false,
         last_health_check: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -331,8 +336,8 @@ app.post('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req
       phone_number: phoneNumber.trim(),
       phone_number_id: phoneNumberId.trim(),
       waba_id: wabaId.trim(),
-      ...(verifyToken ? { verify_token: verifyToken.trim() } : {}),
-      ...(accessToken && accessToken.trim() ? { access_token: accessToken.trim() } : {}),
+      ...(newVerifyToken ? { verify_token: newVerifyToken } : {}),
+      ...(newAccessToken ? { access_token: newAccessToken } : {}),
       is_verified: false,
     });
 
@@ -395,7 +400,11 @@ app.post('/api/whatsapp/verify-connection', authMiddleware, adminOnlyMiddleware,
       return res.status(400).json({
         connected: false,
         error: data.error?.message || 'Falha ao autenticar na Meta Cloud Platform. Verifique o token e os IDs.',
-        metaError: data.error,
+        // Nunca repassar o objeto de erro cru da Meta: pode conter metadados
+        // da requisição. Somente tipo/mensagem/código são seguros.
+        metaError: data.error
+          ? { message: data.error.message, code: data.error.code, type: data.error.type }
+          : undefined,
       });
     }
 
