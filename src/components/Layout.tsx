@@ -12,6 +12,7 @@ export default function Layout() {
 
   const adminNavItems = [
     { name: 'Dashboard Administrativo', path: '/dashboard', icon: 'dashboard', badge: 'Admin' },
+    { name: 'Configuração WhatsApp', path: '/dashboard?config=1', icon: 'settings', badge: 'Meta' },
     { name: 'Contatos de Clientes', path: '/contatos', icon: 'contacts' },
     { name: 'Usuários e Atendentes', path: '/atendentes', icon: 'manage_accounts', badge: 'Gestão' },
     { name: 'Mensagens Prontas', path: '/mensagens', icon: 'quickreply' },
@@ -148,7 +149,14 @@ export default function Layout() {
               {isAdmin ? 'Módulos Administrativos' : 'Menu Operacional'}
             </div>
             {navItems.map((item) => {
-              const isActive = location.pathname === item.path;
+              // Itens com query string (ex.: /dashboard?config=1) são comparados
+              // separadamente para não conflitar com o item principal /dashboard.
+              const [itemPath, itemQuery] = item.path.split('?');
+              const isConfigLink = Boolean(itemQuery);
+              const isActive = isConfigLink
+                ? location.pathname === itemPath && location.search.includes(itemQuery)
+                : location.pathname === item.path &&
+                  !(item.path === '/dashboard' && new URLSearchParams(location.search).get('config') === '1');
 
               return (
                 <Link

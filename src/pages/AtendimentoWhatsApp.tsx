@@ -1,16 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
+import {
+  ConversationStatusIndicator,
+  ConversationStatusLegend,
+} from '../components/ConversationStatusIndicator';
+import {
+  normalizeConversationVisualStatus,
+  resolveConversationVisualStatus,
+  type ConversationVisualStatus,
+} from '../utils/conversationStatus';
 
 interface Conversation {
   id: string;
   contactName: string;
   contactPhone: string;
-  assignedTo: string;
+  assignedName?: string | null;
   status: 'open' | 'in_progress' | 'closed';
   lastMessage: string;
   lastMessageAt: string;
   unreadCount: number;
+  visualStatus: ConversationVisualStatus;
 }
 
 interface Message {
@@ -30,6 +40,19 @@ interface QuickReply {
   content: string;
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function AtendimentoWhatsApp() {
   const [searchParams] = useSearchParams();
   const urlConvId = searchParams.get('id');
@@ -44,7 +67,7 @@ export default function AtendimentoWhatsApp() {
   const [showQuickMenu, setShowQuickMenu] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [isMobileView, setIsMobileView] = useState(false);
+  const [isMobileView, setIsMobileView] = useState(() => window.innerWidth < 1024);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -53,46 +76,92 @@ export default function AtendimentoWhatsApp() {
     loadQuickReplies();
   }, []);
 
+  // Ao abrir uma conversa: marca como lida otimisticamente (visual amarelo) e
+  // sincroniza com o servidor, que registra unread_count = 0 no banco.
   useEffect(() => {
-    if (selectedConvId) {
-      loadMessages(selectedConvId);
-    }
+    if (!selectedConvId) return;
+
+    setConversations((prev) =>
+      prev.map((c: Conversation) =>
+        c.id === selectedConvId && c.unreadCount > 0
+          ? { ...c, unreadCount: 0, visualStatus: 'awaiting_reply' as ConversationVisualStatus }
+          : c
+      )
+    );
+
+    void (async () => {
+      await loadMessages(selectedConvId);
+      await loadConversations(true);
+    })();
   }, [selectedConvId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Mantém os estados sincronizados com o banco: novas mensagens do cliente
+  // voltam a fila para vermelho; se a conversa estiver aberta, o GET de
+  // mensagens registra a leitura e a lista volta a ficar amarela/verde.
+  const pollingRef = useRef(false);
+
+  useEffect(() => {
+    const interval = window.setInterval(async () => {
+      if (pollingRef.current || document.visibilityState !== 'visible') return;
+      pollingRef.current = true;
+      try {
+        if (selectedConvId) {
+          await loadMessages(selectedConvId, true);
+        }
+        await loadConversations(true);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        pollingRef.current = false;
+      }
+    }, 15000);
+    return () => window.clearInterval(interval);
+  }, [selectedConvId]);
+
   useEffect(() => {
     if (urlConvId && conversations.some((c: Conversation) => c.id === urlConvId)) {
       setSelectedConvId(urlConvId);
-    } else if (conversations.length > 0 && !selectedConvId) {
+    } else if (!isMobileView && conversations.length > 0 && !selectedConvId) {
       setSelectedConvId(conversations[0].id);
     }
-  }, [urlConvId, conversations]);
+  }, [urlConvId, conversations, isMobileView, selectedConvId]);
 
-  // Detectar mobile view para alternar entre lista e chat
+  // Em telas menores que o sidebar do app (lg), alterna entre lista e chat.
   useEffect(() => {
-    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    const checkMobile = () => setIsMobileView(window.innerWidth < 1024);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const loadConversations = async () => {
+  const loadConversations = async (silent = false) => {
     try {
-      setLoading(true);
-      const data: Conversation[] = await api.getConversations();
+      if (!silent) {
+        setLoading(true);
+      }
+      const data: Conversation[] = (await api.getConversations()).map((c: any) => ({
+        ...c,
+        // Garante estado válido mesmo se o campo vier faltando do servidor.
+        visualStatus: normalizeConversationVisualStatus(c.visualStatus, c.unreadCount),
+      }));
       setConversations(data);
-      if (urlConvId && data.some((c: Conversation) => c.id === urlConvId)) {
-        setSelectedConvId(urlConvId);
-      } else if (data.length > 0 && !selectedConvId) {
-        setSelectedConvId(data[0].id);
+      if (!silent) {
+        if (urlConvId && data.some((c: Conversation) => c.id === urlConvId)) {
+          setSelectedConvId(urlConvId);
+        } else if (!isMobileView && data.length > 0 && !selectedConvId) {
+          setSelectedConvId(data[0].id);
+        }
       }
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -105,10 +174,17 @@ export default function AtendimentoWhatsApp() {
     }
   };
 
-  const loadMessages = async (convId: string) => {
+  const loadMessages = async (convId: string, silent = false) => {
     try {
       const msgs = await api.getMessages(convId);
-      setMessages(msgs);
+      // Em sincronização silenciosa só troca o estado se houver mensagem nova,
+      // para não disparar auto-scroll enquanto o atendente lê escrevendo.
+      setMessages((prev) => {
+        if (silent && prev.length > 0 && msgs.length > 0) {
+          return prev[prev.length - 1].id === msgs[msgs.length - 1].id ? prev : msgs;
+        }
+        return msgs;
+      });
     } catch (e) {
       console.error(e);
     }
@@ -118,6 +194,8 @@ export default function AtendimentoWhatsApp() {
     e.preventDefault();
     if (!selectedConvId || !newMessage.trim() || sending) return;
 
+    const isAgentReply = !isInternalNote;
+
     try {
       setSending(true);
       const sent = await api.sendMessage(
@@ -126,9 +204,30 @@ export default function AtendimentoWhatsApp() {
         isInternalNote ? 'internal_note' : 'agent'
       );
       setMessages((prev) => [...prev, sent]);
+
+      if (isAgentReply) {
+        setConversations((prev) =>
+          prev.map((c: Conversation) =>
+            c.id === selectedConvId
+              ? {
+                  ...c,
+                  unreadCount: 0,
+                  // Verde só se houver mensagem do cliente respondida por ela;
+                  // a lista é recalculada pelo servidor logo em seguida.
+                  visualStatus: resolveConversationVisualStatus({
+                    unreadCount: 0,
+                    lastCustomerAt: messages.filter((m) => m.senderType === 'customer').pop()?.createdAt ?? null,
+                    lastAgentAt: sent.createdAt ?? null,
+                  }),
+                }
+              : c
+          )
+        );
+      }
+
       setNewMessage('');
       setIsInternalNote(false);
-      loadConversations();
+      await loadConversations(true);
     } catch (err: any) {
       alert(`Erro ao enviar mensagem: ${err.message}`);
     } finally {
@@ -155,17 +254,17 @@ export default function AtendimentoWhatsApp() {
     return c.status === filterStatus;
   });
 
-  // Em mobile, quando uma conversa está selecionada, ocultar a lista
-  const showList = isMobileView ? !selectedConvId : true;
-  const showChat = selectedConversation && (selectedConvId || !isMobileView);
+  // Em telas compactas, a lista e o chat ocupam a tela inteira, um por vez.
+  const showList = !isMobileView || !selectedConvId;
+  const showChat = Boolean(selectedConversation);
 
   return (
-    <div className="h-[calc(100vh-140px)] flex flex-col bg-[#101D2D] rounded-xl border border-[#2B3D50] shadow-[0_2px_8px_-2px_rgba(52,68,92,0.05)] overflow-hidden">
-      <div className="flex-1 flex overflow-hidden">
+    <div className="h-full min-h-[480px] flex flex-col bg-[#101D2D] rounded-xl border border-[#2B3D50] shadow-[0_2px_8px_-2px_rgba(52,68,92,0.05)] overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         
-        {/* Coluna 1: Fila de Atendimento (apenas desktop ou quando não há conversa selecionada no mobile) */}
+        {/* Coluna 1: Fila de Atendimento */}
         {showList && (
-          <div className="w-80 border-r border-[#2B3D50] flex flex-col bg-[#101D2D]/60 flex-shrink-0 md:block">
+          <div className="w-full lg:w-80 lg:border-r border-[#2B3D50] flex flex-col bg-[#101D2D]/60 flex-shrink-0">
 
             {/* Cabeçalho da Fila e Filtro */}
             <div className="p-3.5 border-b border-[#2B3D50] bg-[#17374A]">
@@ -174,7 +273,7 @@ export default function AtendimentoWhatsApp() {
                   Fila de Atendimento
                 </span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-[#C9AE69]/15 text-[#C9AE69] font-bold">
-                  {conversations.length} conversas
+                  {conversations.length} {conversations.length === 1 ? 'conversa' : 'conversas'}
                 </span>
               </div>
 
@@ -217,6 +316,9 @@ export default function AtendimentoWhatsApp() {
                   Resolvidas
                 </button>
               </div>
+
+              {/* Legenda do status visual das conversas */}
+              <ConversationStatusLegend className="mt-2 px-1" />
             </div>
 
             {/* Lista de Conversas */}
@@ -238,6 +340,8 @@ export default function AtendimentoWhatsApp() {
                     <button
                       key={conv.id}
                       type="button"
+                      data-conversation-id={conv.id}
+                      data-visual-status={conv.visualStatus}
                       onClick={() => setSelectedConvId(conv.id)}
                       className={`w-full p-3.5 text-left transition-colors flex items-start gap-3 cursor-pointer ${
                         isSelected
@@ -249,15 +353,21 @@ export default function AtendimentoWhatsApp() {
                         {conv.contactName.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-xs font-bold text-[#F5F2EA] truncate">{conv.contactName}</span>
-                          <span className="text-[10px] text-[#A0B0BA]">{conv.lastMessageAt}</span>
+                        <div className="flex items-center justify-between gap-2 mb-0.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <ConversationStatusIndicator status={conv.visualStatus} />
+                            <span className="text-xs font-bold text-[#F5F2EA] truncate">{conv.contactName}</span>
+                          </div>
+                          <span className="text-[10px] text-[#A0B0BA] flex-shrink-0">{formatDateTime(conv.lastMessageAt)}</span>
                         </div>
                         <p className="text-[11px] text-[#A0B0BA] truncate leading-tight">{conv.lastMessage}</p>
                         <div className="flex items-center justify-between mt-2">
-                          <span className="text-[10px] text-[#A0B0BA] truncate">Resp.: {conv.assignedTo}</span>
+                          <span className="text-[10px] text-[#A0B0BA] truncate">Resp.: {conv.assignedName || 'Não atribuído'}</span>
                           {conv.unreadCount > 0 && (
-                            <span className="w-4 h-4 rounded-full bg-[#C9AE69] text-[#F5F2EA] text-[9px] font-bold flex items-center justify-center">
+                            <span
+                              className="min-w-4 px-1 h-4 rounded-full bg-[#D14747] text-[#F5F2EA] text-[9px] font-bold flex items-center justify-center"
+                              title={`${conv.unreadCount} mensagem(ns) não lida(s)`}
+                            >
                               {conv.unreadCount}
                             </span>
                           )}
@@ -271,50 +381,57 @@ export default function AtendimentoWhatsApp() {
           </div>
         )}
 
-        {/* Botão voltar na lista (apenas mobile com conversa selecionada) */}
-        {isMobileView && selectedConvId && (
-          <div className="md:hidden p-3 border-b border-[#2B3D50] bg-[#17374A]">
-            <button
-              type="button"
-              onClick={() => setSelectedConvId(null)}
-              className="flex items-center gap-2 text-[#C9AE69] text-xs font-semibold hover:text-[#E0C98F]"
-            >
-              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-              <span>Voltar à lista</span>
-            </button>
-          </div>
-        )}
-
         {/* Coluna 2: Chat Viewport Principal */}
         {showChat ? (
           <div className="flex-1 flex flex-col bg-[#101D2D] min-w-0">
+            {/* Voltar para a fila em telas compactas */}
+            {isMobileView && (
+              <div className="lg:hidden px-3 py-2 border-b border-[#2B3D50] bg-[#17374A] flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedConvId(null)}
+                  className="inline-flex items-center gap-2 text-[#C9AE69] text-xs font-semibold hover:text-[#E0C98F]"
+                >
+                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                  <span>Voltar à fila</span>
+                </button>
+              </div>
+            )}
+
             {/* Header do Chat Selecionado */}
-            <div className="h-14 px-4 bg-[#17374A] border-b border-[#2B3D50] flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
+            <div className="min-h-14 px-3 sm:px-4 py-2 bg-[#17374A] border-b border-[#2B3D50] flex items-center justify-between gap-2 flex-shrink-0">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="w-9 h-9 rounded-full bg-[#17374A] text-[#F5F2EA] font-bold text-sm flex items-center justify-center flex-shrink-0">
                   {selectedConversation?.contactName.charAt(0)}
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-sm font-bold text-[#F5F2EA] truncate">{selectedConversation?.contactName}</h3>
-                  <div className="flex items-center gap-2 text-xs text-[#A0B0BA]">
-                    <span className="font-mono">{selectedConversation?.contactPhone}</span>
-                    <span>•</span>
-                    <span className="text-[#39AC6B] font-medium">WhatsApp Oficial</span>
+                  <div className="flex items-center gap-1.5 text-[11px] text-[#A0B0BA] min-w-0">
+                    <span className="font-mono truncate">{selectedConversation?.contactPhone}</span>
+                    <span className="hidden sm:inline">•</span>
+                    <span className="hidden sm:inline text-[#39AC6B] font-medium whitespace-nowrap">WhatsApp Oficial</span>
+                    <span className="hidden sm:inline">•</span>
+                    <ConversationStatusIndicator
+                      status={selectedConversation?.visualStatus}
+                      unreadCount={selectedConversation?.unreadCount}
+                      withLabel
+                      className="hidden sm:inline-flex"
+                    />
                   </div>
                 </div>
               </div>
 
               {/* Seletor de Status da Conversa */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[#A0B0BA] font-medium hidden sm:inline">Status:</span>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-xs text-[#A0B0BA] font-medium hidden xl:inline">Status:</span>
                 <select
                   value={selectedConversation?.status}
                   onChange={(e) => handleStatusChange(e.target.value as any)}
-                  className="px-2.5 py-1.5 rounded-lg border border-[#2B3D50] bg-[#17374A] text-xs font-semibold text-[#F5F2EA] outline-none cursor-pointer focus:border-[#C9AE69]"
+                  className="w-[142px] sm:w-[160px] px-2 py-1.5 rounded-lg border border-[#2B3D50] bg-[#17374A] text-[11px] sm:text-xs font-semibold text-[#F5F2EA] outline-none cursor-pointer focus:border-[#C9AE69]"
                 >
-                  <option value="open">Aguardando Resposta</option>
+                  <option value="open">Aguardando</option>
                   <option value="in_progress">Em Atendimento</option>
-                  <option value="closed">Encerrada / Resolvida</option>
+                  <option value="closed">Resolvida</option>
                 </select>
               </div>
             </div>
@@ -327,7 +444,7 @@ export default function AtendimentoWhatsApp() {
                     <div key={msg.id} className="max-w-md mx-auto p-3 rounded-lg bg-[#17374A] border border-dashed border-[#C9AE69] text-xs text-[#C9AE69]">
                       <div className="flex items-center gap-1.5 font-bold mb-1">
                         <span className="material-symbols-outlined text-[14px]">lock</span>
-                        <span>Nota Interna • {msg.senderName} ({msg.createdAt})</span>
+                        <span>Nota Interna • {msg.senderName} ({formatDateTime(msg.createdAt)})</span>
                       </div>
                       <p className="leading-relaxed">{msg.content}</p>
                     </div>
@@ -340,7 +457,7 @@ export default function AtendimentoWhatsApp() {
                     <div className={`max-w-xs md:max-w-md p-3 rounded-xl shadow-xs text-xs leading-relaxed transition-all ${isAgent ? 'bg-[#39AC6B]/20 text-[#F5F2EA] border border-[#39AC6B]/50 rounded-br-xs' : 'bg-[#17374A] text-[#F5F2EA] border border-[#2B3D50] rounded-bl-xs'}`}>
                       <p className="whitespace-pre-wrap select-text">{msg.content}</p>
                       <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] text-[#A0B0BA] select-none">
-                        <span>{msg.createdAt}</span>
+                        <span>{formatDateTime(msg.createdAt)}</span>
                         {isAgent && (
                           <span className={`material-symbols-outlined text-[13px] ${msg.status === 'read' ? 'text-[#39AC6B]' : 'text-[#8696A0]'}`} title={msg.status === 'read' ? 'Lida' : 'Entregue'}>
                             {msg.status === 'read' ? 'done_all' : 'done'}
@@ -385,31 +502,31 @@ export default function AtendimentoWhatsApp() {
                 </div>
               </div>
 
-              <span className="text-[11px] text-[#A0B0BA]">Pressione <strong>Enter</strong> para enviar</span>
+              <span className="hidden sm:inline text-[11px] text-[#A0B0BA]">Pressione <strong>Enter</strong> para enviar</span>
             </div>
 
             {/* Composer de Envio */}
-            <form onSubmit={handleSendMessage} className="p-4 bg-[#17374A] border-t border-[#2B3D50] flex items-center gap-3">
-              <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isInternalNote ? 'Escreva uma nota interna (visível apenas para sua equipe)...' : 'Digite sua mensagem no WhatsApp...'} className={`flex-1 px-4 py-2.5 rounded-lg border text-xs outline-none transition-all ${isInternalNote ? 'border-[#C9AE69] bg-[#17374A] text-[#C9AE69] placeholder-[#C9AE69]/60' : 'border-[#2B3D50] bg-[#101D2D] text-[#F5F2EA] focus:border-[#C9AE69] focus:bg-[#17374A]'}`} />
-              <button type="submit" disabled={sending || !newMessage.trim()} className={`px-4 py-2.5 rounded-lg font-semibold text-xs text-[#F5F2EA] flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${isInternalNote ? 'bg-[#C9AE69]' : 'bg-[#C9AE69] hover:brightness-95'} disabled:opacity-50`}>
+            <form onSubmit={handleSendMessage} className="p-3 sm:p-4 bg-[#17374A] border-t border-[#2B3D50] flex items-center gap-2 sm:gap-3">
+              <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isInternalNote ? 'Escreva uma nota interna (visível apenas para sua equipe)...' : 'Digite sua mensagem no WhatsApp...'} className={`flex-1 min-w-0 px-3 sm:px-4 py-2.5 rounded-lg border text-xs outline-none transition-all ${isInternalNote ? 'border-[#C9AE69] bg-[#17374A] text-[#C9AE69] placeholder-[#C9AE69]/60' : 'border-[#2B3D50] bg-[#101D2D] text-[#F5F2EA] focus:border-[#C9AE69] focus:bg-[#17374A]'}`} />
+              <button type="submit" disabled={sending || !newMessage.trim()} className={`px-3 sm:px-4 py-2.5 rounded-lg font-semibold text-xs text-[#F5F2EA] flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${isInternalNote ? 'bg-[#C9AE69]' : 'bg-[#C9AE69] hover:brightness-95'} disabled:opacity-50`}>
                 <span>{isInternalNote ? 'Salvar Nota' : 'Enviar'}</span>
                 <span className="material-symbols-outlined text-[16px]">{isInternalNote ? 'note_add' : 'send'}</span>
               </button>
             </form>
           </div>
-        ) : (
+        ) : !isMobileView ? (
           <div className="flex-1 flex flex-col items-center justify-center text-[#A0B0BA] text-xs p-8 bg-[#101D2D]/30">
             <div className="w-14 h-14 rounded-full bg-[#101D2D] flex items-center justify-center text-[#A0B0BA] mb-3">
               <span className="material-symbols-outlined text-[28px]">chat</span>
             </div>
             <h3 className="text-sm font-semibold text-[#F5F2EA] mb-1">Central de Atendimento WhatsApp</h3>
-            <p className="text-xs text-[#A0B0BA] max-w-sm text-center mb-4 leading-relaxed">Não há nenhuma conversa selecionada. Todas as mensagens fictícias foram apagadas do sistema.</p>
+            <p className="text-xs text-[#A0B0BA] max-w-sm text-center mb-4 leading-relaxed">Selecione uma conversa na fila ao lado para começar o atendimento.</p>
             <Link to="/contatos" className="px-4 py-2 rounded-lg bg-[#C9AE69] text-[#F5F2EA] text-xs font-semibold hover:brightness-95 transition-all shadow-xs inline-flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px]">contacts</span>
               <span>Ver Lista de Contatos</span>
             </Link>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

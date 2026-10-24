@@ -5,8 +5,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
+import {
+  computeConversationVisualStatusMap,
+  type ConversationVisualStatus,
+} from './src/utils/conversationStatus.js';
 
 dotenv.config();
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const app = express();
 
@@ -60,14 +66,20 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 let supabase: SupabaseClient | null = null;
+// Cliente separado para login. O cliente de dados permanece sempre com a
+// service role, evitando que um login mude a sessão e aplique RLS nas rotas.
+let supabaseAuth: SupabaseClient | null = null;
 
 if (supabaseUrl && supabaseServiceRoleKey) {
-  supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  const authOptions = {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-  });
+  };
+
+  supabase = createClient(supabaseUrl, supabaseServiceRoleKey, authOptions);
+  supabaseAuth = createClient(supabaseUrl, supabaseServiceRoleKey, authOptions);
 } else {
   console.warn('[AVISO] SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados. O servidor funcionará em modo limitado.');
 }
@@ -191,12 +203,12 @@ const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: Ne
 
   const token = authHeader.substring(7);
 
-  if (!supabase) {
+  if (!supabase || !supabaseAuth) {
     return res.status(500).json({ error: 'Serviço de autenticação não configurado no servidor.' });
   }
 
   try {
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
 
     if (error || !user) {
       return res.status(401).json({ error: 'Token inválido ou expirado.' });
@@ -443,33 +455,33 @@ app.get('/api/whatsapp/status', authMiddleware, async (req, res) => {
 app.get('/api/webhook/whatsapp', async (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
 
-  if (!supabase) {
-    return res.status(500).json({ error: 'Supabase não configurado.' });
+  // 1. Tentar obter o verify token a partir da variável de ambiente (definido explicitamente).
+  //    Isso evita depender de uma linha na tabela whatsapp_configs e não cria fallback inseguro.
+  let expectedToken: string | null = process.env.WHATSAPP_VERIFY_TOKEN?.trim() || null;
+
+  // 2. Se não houver variável de ambiente, consultar a configuração no banco (maybeSingle não falha se vazio).
+  if (!expectedToken && supabase) {
+    try {
+      const { data } = await supabase
+        .from('whatsapp_configs')
+        .select('verify_token')
+        .limit(1)
+        .maybeSingle();
+      expectedToken = data?.verify_token?.trim() || null;
+    } catch {
+      // Sem configuração disponível; expectedToken permanece null.
+    }
   }
 
-  try {
-    const { data, error: fetchError } = await supabase
-      .from('whatsapp_configs')
-      .select('verify_token')
-      .limit(1)
-      .single();
-
-    if (fetchError) {
-      return res.status(500).send('Erro interno.');
-    }
-
-    const verifyToken = data?.verify_token || 'reobote_webhook_secret_token';
-
-    if (mode === 'subscribe' && token === verifyToken) {
-      console.log('[Meta Webhook] Desafio de verificação aceito com sucesso!');
-      return res.status(200).send(req.query['hub.challenge']);
-    }
-
-    res.status(403).send('Token de verificação inválido.');
-  } catch {
-    res.status(500).send('Erro interno.');
+  // 3. Validar: mode=subscribe, token presente e igual ao esperado.
+  if (mode === 'subscribe' && typeof token === 'string' && token.length > 0 && expectedToken && token === expectedToken) {
+    console.log('[Meta Webhook] Desafio de verificação aceito com sucesso!');
+    return res.status(200).send(typeof challenge === 'string' ? challenge : String(challenge ?? ''));
   }
+
+  return res.status(403).send('Token de verificação inválido.');
 });
 
 // Webhook Oficial da Meta (Recebimento de Eventos POST)
@@ -490,9 +502,14 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
     return res.status(500).send('Erro interno.');
   }
 
+  const rawBody = req.body;
+  if (!Buffer.isBuffer(rawBody)) {
+    return res.status(400).send('Corpo inválido.');
+  }
+
   // Validar assinatura HMAC-SHA256 da Meta
   const hmac = crypto.createHmac('sha256', appSecret);
-  hmac.update(req.body);
+  hmac.update(rawBody);
   const expectedSignature = `sha256=${hmac.digest('hex')}`;
 
   const sig = String(signature);
@@ -500,29 +517,184 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
     return res.status(401).send('Assinatura inválida.');
   }
 
-  const body = req.body;
-
-  if (body.object === 'whatsapp_business_account') {
-    try {
-      const entry = body.entry?.[0];
-      const changes = entry?.changes?.[0];
-      const value = changes?.value;
-      const messages = value?.messages;
-
-      if (messages && messages[0]) {
-        const inbound = messages[0];
-        const from = inbound.from;
-        const text = inbound.text?.body || '[Mensagem de mídia]';
-
-        console.log(`[Meta Webhook] Mensagem recebida de ${from}: ${text}`);
-      }
-    } catch (e) {
-      console.error('[Meta Webhook] Erro ao interpretar payload da Meta:', e);
-    }
-    return res.status(200).send('EVENT_RECEIVED');
+  let body: any;
+  try {
+    body = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    return res.status(400).send('JSON inválido.');
   }
 
-  res.sendStatus(404);
+  if (body.object !== 'whatsapp_business_account') {
+    return res.sendStatus(404);
+  }
+
+  try {
+    // A configuração é global no schema atual. Se houver company_id, usa;
+    // caso contrário, resolve pela primeira unidade (cenário de uma empresa).
+    const { data: cfg } = await supabase
+      .from('whatsapp_configs')
+      .select('company_id')
+      .limit(1)
+      .maybeSingle();
+
+    let companyId: string | null = cfg?.company_id || null;
+    if (!companyId) {
+      const { data: firstCompany } = await supabase
+        .from('companies')
+        .select('id')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      companyId = firstCompany?.id || null;
+    }
+
+    if (!companyId) {
+      console.error('[Meta Webhook] Nenhuma empresa cadastrada para associar a mensagem.');
+      return res.status(200).send('EVENT_RECEIVED');
+    }
+
+    const entries = Array.isArray(body.entry) ? body.entry : [];
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+
+      for (const change of changes) {
+        const value = change?.value;
+        if (!value) continue;
+
+        // Mensagens recebidas do cliente
+        const inboundMessages = Array.isArray(value.messages) ? value.messages : [];
+        for (const inbound of inboundMessages) {
+          const from = String(inbound?.from || '').replace(/\D/g, '');
+          if (!from) continue;
+
+          if (inbound?.id) {
+            const { data: existingMessage } = await supabase
+              .from('messages')
+              .select('id')
+              .eq('whatsapp_message_id', inbound.id)
+              .maybeSingle();
+
+            if (existingMessage) continue;
+          }
+
+          const contactName =
+            value.contacts?.[0]?.profile?.name?.trim() || `Contato ${from}`;
+
+          let { data: contact } = await supabase
+            .from('contacts')
+            .select('id')
+            .eq('company_id', companyId)
+            .eq('phone', from)
+            .maybeSingle();
+
+          if (!contact) {
+            const { data: plusContact } = await supabase
+              .from('contacts')
+              .select('id')
+              .eq('company_id', companyId)
+              .eq('phone', `+${from}`)
+              .maybeSingle();
+            contact = plusContact;
+          }
+
+          if (!contact) {
+            const { data: newContact, error: contactError } = await supabase
+              .from('contacts')
+              .insert({
+                company_id: companyId,
+                name: contactName,
+                phone: from,
+              })
+              .select('id')
+              .single();
+
+            if (contactError || !newContact) {
+              console.error('[Meta Webhook] Erro ao criar contato:', contactError?.message);
+              continue;
+            }
+            contact = newContact;
+          }
+
+          const content =
+            inbound?.text?.body ||
+            (inbound?.type ? `[Mensagem de ${inbound.type}]` : '[Mensagem recebida]');
+          const now = new Date().toISOString();
+
+          const { data: existingConv } = await supabase
+            .from('conversations')
+            .select('*')
+            .eq('company_id', companyId)
+            .eq('contact_id', contact.id)
+            .in('status', ['open', 'in_progress'])
+            .order('last_message_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          let conversationId: string | null = existingConv?.id || null;
+
+          if (conversationId && existingConv) {
+            await supabase
+              .from('conversations')
+              .update({
+                last_message: content,
+                last_message_at: now,
+                unread_count: (existingConv.unread_count || 0) + 1,
+              })
+              .eq('id', conversationId);
+          } else {
+            const { data: newConv, error: convError } = await supabase
+              .from('conversations')
+              .insert({
+                company_id: companyId,
+                contact_id: contact.id,
+                status: 'open',
+                last_message: content,
+                last_message_at: now,
+                unread_count: 1,
+              })
+              .select('id')
+              .single();
+
+            if (convError || !newConv) {
+              console.error('[Meta Webhook] Erro ao criar conversa:', convError?.message);
+              continue;
+            }
+            conversationId = newConv.id;
+          }
+
+          const { error: messageError } = await supabase.from('messages').insert({
+            conversation_id: conversationId,
+            sender_type: 'customer',
+            content,
+            status: 'delivered',
+            whatsapp_message_id: inbound?.id || null,
+          });
+
+          if (messageError) {
+            console.error('[Meta Webhook] Erro ao salvar mensagem:', messageError.message);
+          }
+        }
+
+        // Atualizações de entrega/leitura das mensagens enviadas
+        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+        for (const statusUpdate of statuses) {
+          const messageId = statusUpdate?.id;
+          const newStatus = statusUpdate?.status;
+          if (!messageId || !['sent', 'delivered', 'read', 'failed'].includes(newStatus)) continue;
+
+          await supabase
+            .from('messages')
+            .update({ status: newStatus })
+            .eq('whatsapp_message_id', messageId);
+        }
+      }
+    }
+
+    return res.status(200).send('EVENT_RECEIVED');
+  } catch (e) {
+    console.error('[Meta Webhook] Erro ao processar evento:', e);
+    return res.status(500).send('Erro interno.');
+  }
 });
 
 // 2. CRUD: Contatos (Isolamento estrito por Empresa)
@@ -780,13 +952,68 @@ app.put('/api/users/:id', authMiddleware, adminOnlyMiddleware, async (req: Authe
 
   const { name, email, role, status } = req.body;
 
+  if (name === undefined && email === undefined && role === undefined && status === undefined) {
+    return res.status(400).json({ error: 'Informe ao menos um campo para atualizar.' });
+  }
+
+  if (role !== undefined && !['admin', 'user'].includes(role)) {
+    return res.status(400).json({ error: 'Perfil inválido.' });
+  }
+
+  if (status !== undefined && !['online', 'busy', 'offline'].includes(status)) {
+    return res.status(400).json({ error: 'Status inválido.' });
+  }
+
+  if (req.params.id === req.authUserId && role !== undefined && role !== 'admin') {
+    return res.status(400).json({ error: 'Você não pode remover seu próprio acesso de administrador.' });
+  }
+
+  let normalizedEmail = existing.email as string;
+  if (email !== undefined) {
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ error: 'E-mail inválido.' });
+    }
+    normalizedEmail = email.trim().toLowerCase();
+  }
+
+  if (normalizedEmail !== existing.email) {
+    const { data: duplicate, error: duplicateError } = await supabase
+      .from('users')
+      .select('id')
+      .ilike('email', normalizedEmail)
+      .neq('id', req.params.id)
+      .limit(1);
+
+    if (duplicateError) {
+      return res.status(500).json({ error: 'Erro ao verificar e-mail.' });
+    }
+
+    if (duplicate && duplicate.length > 0) {
+      return res.status(409).json({ error: 'Este e-mail já está cadastrado no sistema.' });
+    }
+
+    const { error: authUpdateError } = await supabase.auth.admin.updateUserById(req.params.id, {
+      email: normalizedEmail,
+      email_confirm: true,
+    });
+
+    if (authUpdateError) {
+      const alreadyExists = /already|registered|exists/i.test(authUpdateError.message || '');
+      return res.status(alreadyExists ? 409 : 500).json({
+        error: alreadyExists
+          ? 'Este e-mail já possui conta de acesso.'
+          : 'Erro ao atualizar o e-mail de acesso.',
+      });
+    }
+  }
+
   const { data, error } = await supabase
     .from('users')
     .update({
-      name: name ? name.trim() : existing.name,
-      email: email ? email.trim().toLowerCase() : existing.email,
-      role: role || existing.role,
-      status: status || existing.status,
+      name: name !== undefined ? String(name).trim() : existing.name,
+      email: normalizedEmail,
+      role: role !== undefined ? role : existing.role,
+      status: status !== undefined ? status : existing.status,
       updated_at: new Date().toISOString(),
     })
     .eq('id', req.params.id)
@@ -794,6 +1021,12 @@ app.put('/api/users/:id', authMiddleware, adminOnlyMiddleware, async (req: Authe
     .single();
 
   if (error) {
+    if (normalizedEmail !== existing.email) {
+      await supabase.auth.admin.updateUserById(req.params.id, {
+        email: existing.email,
+        email_confirm: true,
+      });
+    }
     return res.status(500).json({ error: 'Erro ao atualizar usuário.' });
   }
 
@@ -813,6 +1046,10 @@ app.delete('/api/users/:id', authMiddleware, adminOnlyMiddleware, async (req: Au
 
   if (fetchError || !existing) {
     return res.status(404).json({ error: 'Usuário não encontrado.' });
+  }
+
+  if (req.params.id === req.authUserId) {
+    return res.status(400).json({ error: 'Você não pode remover sua própria conta.' });
   }
 
   // Remove também a conta de login, evitando "usuário provisório" sem perfil
@@ -1073,13 +1310,66 @@ app.delete('/api/quick-replies/:id', authMiddleware, async (req: AuthenticatedRe
   res.json({ success: true, message: 'Mensagem pronta excluída com sucesso.' });
 });
 
+// Calcula o estado visual (não lida / sem resposta / respondida) a partir das
+// mensagens persistidas. O unread_count é a fonte de verdade para "não lida".
+async function loadConversationVisualStatuses(
+  conversations: Array<{ id: string; unread_count?: number | null }>
+): Promise<Record<string, ConversationVisualStatus>> {
+  if (!supabase || conversations.length === 0) {
+    return {};
+  }
+
+  const ids = conversations.map((conversation) => conversation.id);
+  const unreadCounts = Object.fromEntries(
+    conversations.map((conversation) => [conversation.id, conversation.unread_count || 0])
+  );
+
+  const messages: Array<{
+    conversationId: string;
+    senderType: 'customer' | 'agent' | 'system' | 'internal_note';
+    createdAt: string;
+  }> = [];
+
+  // Consulta em blocos para não estourar o tamanho da URL do PostgREST.
+  const CHUNK_SIZE = 200;
+  for (let index = 0; index < ids.length; index += CHUNK_SIZE) {
+    const chunk = ids.slice(index, index + CHUNK_SIZE);
+    const { data, error } = await supabase
+      .from('messages')
+      .select('conversation_id, sender_type, created_at')
+      .in('conversation_id', chunk);
+
+    if (error) {
+      console.error('[Conversas] Erro ao calcular status visual:', error.message);
+      return Object.fromEntries(
+        conversations.map((conversation) => [
+          conversation.id,
+          (conversation.unread_count || 0) > 0 ? 'unread' : 'awaiting_reply',
+        ])
+      );
+    }
+
+    for (const message of data || []) {
+      messages.push({
+        conversationId: message.conversation_id,
+        senderType: message.sender_type as 'customer' | 'agent' | 'system' | 'internal_note',
+        createdAt: message.created_at,
+      });
+    }
+  }
+
+  return computeConversationVisualStatusMap(ids, messages, unreadCounts);
+}
+
 // 6. Conversas e Mensagens (Atendimento WhatsApp)
 app.get('/api/conversations', authMiddleware, async (req: AuthenticatedRequest, res) => {
   if (!supabase) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
 
-  let query = supabase.from('conversations').select('*');
+  let query = supabase
+    .from('conversations')
+    .select('*, contact:contacts!conversations_contact_id_fkey(name, phone), assignee:users!conversations_assigned_to_fkey(name)');
 
   if (req.authRole !== 'admin') {
     query = query.eq('company_id', req.authCompanyId);
@@ -1091,7 +1381,16 @@ app.get('/api/conversations', authMiddleware, async (req: AuthenticatedRequest, 
     return res.status(500).json({ error: 'Erro ao listar conversas.' });
   }
 
-  res.json(data || []);
+  const conversations = data || [];
+  const visualStatuses = await loadConversationVisualStatuses(conversations);
+
+  res.json(conversations.map((conv: any) => ({
+    ...conv,
+    contact_name: conv.contact?.name || '',
+    contact_phone: conv.contact?.phone || '',
+    assigned_name: conv.assignee?.name || null,
+    visual_status: visualStatuses[conv.id] || 'awaiting_reply',
+  })));
 });
 
 app.post('/api/conversations', authMiddleware, async (req: AuthenticatedRequest, res) => {
@@ -1105,9 +1404,26 @@ app.post('/api/conversations', authMiddleware, async (req: AuthenticatedRequest,
   }
 
   const companyId = req.authCompanyId;
+  if (!companyId) {
+    return res.status(400).json({ error: 'Seu usuário não está vinculado a uma empresa.' });
+  }
 
-  let contactIdFinal = contactId;
-  if (!contactIdFinal) {
+  let contactIdFinal = typeof contactId === 'string' && contactId.trim() ? contactId.trim() : null;
+  if (contactIdFinal) {
+    const { data: existingContact, error: contactError } = await supabase
+      .from('contacts')
+      .select('id, company_id')
+      .eq('id', contactIdFinal)
+      .single();
+
+    if (contactError || !existingContact) {
+      return res.status(404).json({ error: 'Contato não encontrado.' });
+    }
+
+    if (existingContact.company_id !== companyId) {
+      return res.status(403).json({ error: 'O contato não pertence à sua empresa.' });
+    }
+  } else {
     // Criar contato automaticamente
     const { data: newContact, error: contactError } = await supabase
       .from('contacts')
@@ -1152,7 +1468,18 @@ app.post('/api/conversations', authMiddleware, async (req: AuthenticatedRequest,
     });
   }
 
-  res.status(201).json(newConv);
+  const { data: conversationContact } = await supabase
+    .from('contacts')
+    .select('name, phone')
+    .eq('id', contactIdFinal)
+    .single();
+
+  res.status(201).json({
+    ...newConv,
+    contact_name: conversationContact?.name || contactName.trim(),
+    contact_phone: conversationContact?.phone || contactPhone.trim(),
+    assigned_name: req.authUserName || null,
+  });
 });
 
 app.get('/api/conversations/:id/messages', authMiddleware, async (req: AuthenticatedRequest, res) => {
@@ -1182,7 +1509,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req: Authentic
 
   const { data, error } = await supabase
     .from('messages')
-    .select('*')
+    .select('*, sender:users!messages_sender_id_fkey(name)')
     .eq('conversation_id', req.params.id)
     .order('created_at', { ascending: true });
 
@@ -1190,7 +1517,10 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req: Authentic
     return res.status(500).json({ error: 'Erro ao obter mensagens.' });
   }
 
-  res.json(data || []);
+  res.json((data || []).map((message: any) => ({
+    ...message,
+    sender_name: message.sender?.name || (message.sender_type === 'customer' ? 'Cliente' : 'Sistema'),
+  })));
 });
 
 app.post('/api/conversations/:id/messages', authMiddleware, async (req: AuthenticatedRequest, res) => {
@@ -1206,6 +1536,10 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
 
   if (convError || !conv) {
     return res.status(404).json({ error: 'Conversa não encontrada.' });
+  }
+
+  if (req.authRole !== 'admin' && conv.company_id !== req.authCompanyId) {
+    return res.status(403).json({ error: 'Acesso negado a esta conversa.' });
   }
 
   const { content, senderType } = req.body;
@@ -1236,8 +1570,10 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
       .from('conversations')
       .update({
         last_message: content.trim(),
-        last_message_at: new Date().toISOString(),
-        unread_count: conv.unread_count ? conv.unread_count + 1 : 1,
+        last_message_at: newMsg.created_at || new Date().toISOString(),
+        // Uma resposta do atendente atende/limpa as mensagens pendentes.
+        // O estado visual é recalculado a partir das mensagens persistidas.
+        unread_count: 0,
       })
       .eq('id', conv.id);
 
@@ -1281,7 +1617,10 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
     }
   }
 
-  res.status(201).json(newMsg);
+  res.status(201).json({
+    ...newMsg,
+    sender_name: req.authUserName || 'Atendente',
+  });
 });
 
 app.patch('/api/conversations/:id/status', authMiddleware, async (req: AuthenticatedRequest, res) => {
@@ -1299,10 +1638,42 @@ app.patch('/api/conversations/:id/status', authMiddleware, async (req: Authentic
     return res.status(404).json({ error: 'Conversa não encontrada.' });
   }
 
+  if (req.authRole !== 'admin' && conv.company_id !== req.authCompanyId) {
+    return res.status(403).json({ error: 'Acesso negado a esta conversa.' });
+  }
+
   const { status, assignedTo } = req.body;
 
+  if (status !== undefined && !['open', 'in_progress', 'closed'].includes(status)) {
+    return res.status(400).json({ error: 'Status inválido.' });
+  }
+
+  if (assignedTo !== undefined && assignedTo !== null) {
+    if (typeof assignedTo !== 'string' || !UUID_REGEX.test(assignedTo)) {
+      return res.status(400).json({ error: 'Atendente inválido.' });
+    }
+
+    const { data: assignee, error: assigneeError } = await supabase
+      .from('users')
+      .select('id, company_id')
+      .eq('id', assignedTo)
+      .single();
+
+    if (assigneeError || !assignee) {
+      return res.status(400).json({ error: 'Atendente não encontrado.' });
+    }
+
+    if (assignee.company_id !== conv.company_id) {
+      return res.status(400).json({ error: 'O atendente pertence a outra empresa.' });
+    }
+  }
+
+  if (status === undefined && assignedTo === undefined) {
+    return res.status(400).json({ error: 'Informe o status ou o atendente responsável.' });
+  }
+
   const updateData: any = {};
-  if (status) updateData.status = status;
+  if (status !== undefined) updateData.status = status;
   if (assignedTo !== undefined) updateData.assigned_to = assignedTo;
   updateData.updated_at = new Date().toISOString();
 
@@ -1331,7 +1702,9 @@ app.get('/api/dashboard/attendant-stats', authMiddleware, async (req: Authentica
   const companyId = req.authCompanyId;
 
   // Busca conversas da empresa (ou todas se admin)
-  let convQuery = supabase.from('conversations').select('*');
+  let convQuery = supabase
+    .from('conversations')
+    .select('*, contact:contacts!conversations_contact_id_fkey(name, phone), assignee:users!conversations_assigned_to_fkey(name)');
   if (req.authRole !== 'admin') {
     convQuery = convQuery.eq('company_id', companyId);
   }
@@ -1341,8 +1714,18 @@ app.get('/api/dashboard/attendant-stats', authMiddleware, async (req: Authentica
     return res.status(500).json({ error: 'Erro ao carregar conversas.' });
   }
 
+  const visualStatuses = await loadConversationVisualStatuses(allConvs || []);
+
+  const enrichedConvs = (allConvs || []).map((conv: any) => ({
+    ...conv,
+    contact_name: conv.contact?.name || '',
+    contact_phone: conv.contact?.phone || '',
+    assigned_name: conv.assignee?.name || null,
+    visual_status: visualStatuses[conv.id] || 'awaiting_reply',
+  }));
+
   // Filtra conversas atribuídas especificamente ao atendente autenticado
-  const myConversations = (allConvs || []).filter((c) => {
+  const myConversations = enrichedConvs.filter((c) => {
     if (req.authRole !== 'admin' && c.company_id !== companyId) return false;
     if (!c.assigned_to) return false;
     return c.assigned_to === currentUserId;
@@ -1422,7 +1805,7 @@ app.get('/api/dashboard/attendant-stats', authMiddleware, async (req: Authentica
 // ============================================================================
 
 app.post('/api/auth/login', async (req, res) => {
-  if (!supabase) {
+  if (!supabase || !supabaseAuth) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
 
@@ -1431,7 +1814,7 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
   }
 
-  const { data, error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabaseAuth.auth.signInWithPassword({
     email: email.trim().toLowerCase(),
     password,
   });
@@ -1465,17 +1848,17 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.post('/api/auth/logout', async (req, res) => {
-  if (!supabase) {
+  if (!supabase || !supabaseAuth) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
 
-  await supabase.auth.signOut();
+  await supabaseAuth.auth.signOut();
 
   res.json({ success: true, message: 'Logout realizado com sucesso.' });
 });
 
 app.post('/api/auth/register', async (req, res) => {
-  if (!supabase) {
+  if (!supabase || !supabaseAuth) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
 
@@ -1492,13 +1875,29 @@ app.post('/api/auth/register', async (req, res) => {
   let targetCompanyId: string | null =
     typeof companyId === 'string' && companyId.trim() ? companyId.trim() : null;
 
-  if (targetCompanyId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetCompanyId)) {
+  if (targetCompanyId && !UUID_REGEX.test(targetCompanyId)) {
     return res.status(400).json({ error: 'Empresa inválida.' });
   }
 
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const { data: existingProfile, error: existingError } = await supabase
+    .from('users')
+    .select('id')
+    .ilike('email', normalizedEmail)
+    .limit(1);
+
+  if (existingError) {
+    return res.status(500).json({ error: 'Erro ao verificar e-mail.' });
+  }
+
+  if (existingProfile && existingProfile.length > 0) {
+    return res.status(409).json({ error: 'Este e-mail já está cadastrado. Faça login ou recupere a senha.' });
+  }
+
   // Cadastro público cria apenas usuário com role 'user', nunca 'admin'
-  const { data, error } = await supabase.auth.signUp({
-    email: email.trim().toLowerCase(),
+  const { data, error } = await supabaseAuth.auth.signUp({
+    email: normalizedEmail,
     password,
     options: {
       data: {
@@ -1510,6 +1909,12 @@ app.post('/api/auth/register', async (req, res) => {
 
   if (error || !data.user) {
     return res.status(400).json({ error: error?.message || 'Erro ao cadastrar usuário.' });
+  }
+
+  // O Supabase pode responder sem erro para e-mail já existente, retornando
+  // um usuário "ofuscado" sem identidades. Nunca apagar essa conta.
+  if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    return res.status(409).json({ error: 'Este e-mail já possui cadastro. Faça login ou recupere a senha.' });
   }
 
   let createdCompanyId: string | null = null;
@@ -1533,22 +1938,34 @@ app.post('/api/auth/register', async (req, res) => {
   }
 
   // Cria registro na tabela users
+  const finalCompanyId = targetCompanyId;
+  if (!finalCompanyId) {
+    return res.status(500).json({ error: 'Erro ao criar unidade do usuário.' });
+  }
+
   const { error: insertError } = await supabase.from('users').insert({
     id: data.user.id,
-    company_id: targetCompanyId,
+    company_id: finalCompanyId,
     name: name.trim(),
-    email: email.trim().toLowerCase(),
+    email: normalizedEmail,
     role: 'user',
     status: 'offline',
   });
 
   if (insertError) {
     // Desfaz auth e empresa criada para não deixar usuário provisório órfão
-    await supabase.auth.admin.deleteUser(data.user.id).catch(() => {});
-    if (createdCompanyId) {
-      await supabase.from('companies').delete().eq('id', createdCompanyId);
+    if (insertError.code !== '23505') {
+      await supabase.auth.admin.deleteUser(data.user.id).catch(() => {});
+      if (createdCompanyId) {
+        await supabase.from('companies').delete().eq('id', createdCompanyId);
+      }
     }
-    return res.status(500).json({ error: 'Erro ao criar perfil de usuário.' });
+    const duplicate = insertError.code === '23505';
+    return res.status(duplicate ? 409 : 500).json({
+      error: duplicate
+        ? 'Este e-mail já está cadastrado. Faça login ou recupere a senha.'
+        : 'Erro ao criar perfil de usuário.',
+    });
   }
 
   res.status(201).json({
@@ -1560,7 +1977,7 @@ app.post('/api/auth/register', async (req, res) => {
 
 // Reset de senha por e-mail (Supabase Auth)
 app.post('/api/auth/reset-password', async (req, res) => {
-  if (!supabase) {
+  if (!supabase || !supabaseAuth) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
 
@@ -1569,7 +1986,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
     return res.status(400).json({ error: 'E-mail é obrigatório.' });
   }
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+  const { error } = await supabaseAuth.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
     redirectTo: `${process.env.APP_URL || 'http://localhost:3000'}/reset-password`,
   });
 
@@ -1583,9 +2000,46 @@ app.post('/api/auth/reset-password', async (req, res) => {
   });
 });
 
-// ============================================================================
-// INTEGRAÇÃO COM VITE (DEV) E ARQUIVOS ESTÁTICOS (PRODUÇÃO)
-// ============================================================================
+// Confirmar a nova senha após o fluxo de recuperação (token da sessão de recuperação).
+// Reutiliza o cliente service_role já existente; não cria tabelas nem variáveis.
+app.post('/api/auth/reset-password/confirm', async (req, res) => {
+  if (!supabase || !supabaseAuth) {
+    return res.status(500).json({ error: 'Supabase não configurado.' });
+  }
+
+  const { accessToken, password } = req.body;
+  const cleanToken = typeof accessToken === 'string' ? accessToken.trim() : '';
+  const cleanPassword = typeof password === 'string' ? password : '';
+
+  if (!cleanToken) {
+    return res.status(400).json({ error: 'Link de recuperação inválido ou expirado. Solicite um novo link.' });
+  }
+
+  if (!cleanPassword || cleanPassword.length < 6) {
+    return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
+  }
+
+  // Valida o token de recuperação recebido no link do e-mail.
+  const { data: authData, error: authError } = await supabaseAuth.auth.getUser(cleanToken);
+
+  if (authError || !authData?.user?.id) {
+    return res.status(401).json({ error: 'Link de recuperação inválido ou expirado. Solicite um novo link.' });
+  }
+
+  const { error: updateError } = await supabaseAuth.auth.admin.updateUserById(authData.user.id, {
+    password: cleanPassword,
+  });
+
+  if (updateError) {
+    return res.status(400).json({ error: updateError.message || 'Falha ao redefinir a senha.' });
+  }
+
+  return res.json({
+    success: true,
+    message: 'Senha redefinida com sucesso.',
+  });
+});
+
 
 // ============================================================================
 // DIAGNÓSTICO TEMPORÁRIO (removido após a validação)
@@ -1617,12 +2071,13 @@ app.get('/api/diag', async (req, res) => {
 
   const counts: Record<string, number | null> = {};
   for (const t of tables) {
-    const cr = await fetch(`${supaUrl}/rest/v1/${t}?select=*`, {
-      method: 'HEAD',
-      headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Prefer: 'count=exact' },
+    const cr = await fetch(`${supaUrl}/rest/v1/${t}?select=id`, {
+      headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Prefer: 'count=exact', Range: '0-0' },
     });
     const range = cr.headers.get('content-range') || '';
-    counts[t] = range.includes('/') ? Number(range.split('/')[1]) : null;
+    const total = range.split('/')[1];
+    // '*/*' => contagem desconhecida no PostgREST; reportamos null, não 0.
+    counts[t] = /^\d+$/.test(total) ? Number(total) : null;
   }
 
   return res.json({
@@ -1712,6 +2167,19 @@ app.post('/api/diag/create-admin', async (req, res) => {
 // Rotas /api não encontradas devem responder JSON (nunca o HTML do SPA)
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Rota da API não encontrada.' });
+});
+
+// Handler global de erros: captura exceções rejeitadas em rotas assíncronas
+// (ex.: falha de rede no Supabase) e devolve JSON 500 — sem isso a promessa
+// fica não tratada e a função serverless da Vercel encerra com
+// FUNCTION_INVOCATION_FAILED em vez de responder 500.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[api] erro não tratado:', err);
+  if (res.headersSent) {
+    return;
+  }
+  res.status(500).json({ error: 'Erro interno do servidor.' });
 });
 
 // Exportado para uso local (dev-server.ts) e como função serverless na Vercel.

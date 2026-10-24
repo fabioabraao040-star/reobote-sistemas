@@ -8,7 +8,20 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  // Aguarda a restauração da sessão do sessionStorage antes de decidir.
+  // Sem isso, um recarregamento em rota protegida redireciona para "/".
+  if (loading) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center p-4">
+        <div className="flex items-center gap-3 text-[#A0B0BA]">
+          <span className="material-symbols-outlined animate-spin text-[22px]">progress_activity</span>
+          <span className="text-sm font-medium">Carregando sessão...</span>
+        </div>
+      </div>
+    );
+  }
 
   // Se não estiver autenticado
   if (!user) {

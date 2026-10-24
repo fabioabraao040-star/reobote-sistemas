@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
+import { ConversationStatusIndicator } from './ConversationStatusIndicator';
 
 interface StatCardProps {
   title: string;
@@ -34,6 +35,7 @@ function StatCard({ title, value, change, subtitle, icon, accentColor = '#C9AE69
 
 export default function Dashboard() {
   const { user, isAdmin } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState<'hoje' | '7dias' | '30dias'>('hoje');
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -92,6 +94,23 @@ export default function Dashboard() {
     };
   }, [isAdmin, user]);
 
+  // Permite abrir o formulário existente por link direto do menu:
+  // /dashboard?config=1 (somente administrador).
+  useEffect(() => {
+    if (isAdmin && searchParams.get('config') === '1') {
+      setShowConfigModal(true);
+    }
+  }, [isAdmin, searchParams]);
+
+  const closeConfigModal = () => {
+    setShowConfigModal(false);
+    if (searchParams.get('config') === '1') {
+      const next = new URLSearchParams(searchParams);
+      next.delete('config');
+      setSearchParams(next, { replace: true });
+    }
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -114,7 +133,7 @@ export default function Dashboard() {
         setCfgPhone(wa.phoneNumber || '');
         setCfgPhoneId(wa.phoneNumberId || '');
         setCfgWabaId(wa.wabaId || '');
-        setCfgVerifyToken(wa.verifyToken || 'reobote_webhook_secret_token');
+        setCfgVerifyToken(wa.verifyToken || '');
       } else {
         const stats = await api.getAttendantStats();
         setAttendantStats(stats);
@@ -282,7 +301,7 @@ export default function Dashboard() {
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <p className="text-sm font-semibold text-[#F5F2EA] truncate">{item.contactName}</p>
-                              {item.unreadCount > 0 && <span className="w-2 h-2 rounded-full bg-[#C9AE69]" title="Nova mensagem" />}
+                              <ConversationStatusIndicator status={item.visualStatus} unreadCount={item.unreadCount} />
                               <span className="text-[11px] text-[#A0B0BA]">{item.contactPhone}</span>
                             </div>
                             <p className="text-xs text-[#A0B0BA] truncate mt-0.5">{item.lastMessage || 'Sem mensagens anteriores.'}</p>
@@ -337,7 +356,7 @@ export default function Dashboard() {
                 <span className="material-symbols-outlined text-[#C9AE69]">settings</span>
                 <h3 className="font-headline-md text-base font-bold text-[#F5F2EA]">Configuração Oficial do WhatsApp (Meta Cloud API)</h3>
               </div>
-              <button type="button" onClick={() => setShowConfigModal(false)} className="text-[#A0B0BA] hover:text-[#F5F2EA] p-1 cursor-pointer" aria-label="Fechar modal">
+              <button type="button" onClick={closeConfigModal} className="text-[#A0B0BA] hover:text-[#F5F2EA] p-1 cursor-pointer" aria-label="Fechar modal">
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
@@ -366,7 +385,7 @@ export default function Dashboard() {
               </div>
               <div>
                 <label className="font-semibold text-[#F5F2EA] block mb-1">Token de Verificação do Webhook (Verify Token)</label>
-                <input type="text" value={cfgVerifyToken} onChange={(e) => setCfgVerifyToken(e.target.value)} placeholder="reobote_webhook_secret_token" className="w-full px-3 py-2 rounded border border-[#2B3D50] text-[#F5F2EA] font-mono text-xs outline-none focus:border-[#C9AE69]" />
+                <input type="text" value={cfgVerifyToken} onChange={(e) => setCfgVerifyToken(e.target.value)} placeholder="Token configurado no painel da Meta" className="w-full px-3 py-2 rounded border border-[#2B3D50] text-[#F5F2EA] font-mono text-xs outline-none focus:border-[#C9AE69]" />
               </div>
               {whatsappInfo.webhookUrl && (
                 <div className="p-3 bg-[#101D2D] border border-[#2B3D50] rounded-lg">
@@ -380,7 +399,7 @@ export default function Dashboard() {
                   <span>{testingConnection ? 'Validando na Meta...' : 'Testar Conexão Oficial'}</span>
                 </button>
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                  <button type="button" onClick={() => setShowConfigModal(false)} className="px-4 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] font-semibold hover:bg-[#101D2D] cursor-pointer">Fechar</button>
+                  <button type="button" onClick={closeConfigModal} className="px-4 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] font-semibold hover:bg-[#101D2D] cursor-pointer">Fechar</button>
                   <button type="submit" disabled={savingConfig} className="px-4 py-2 rounded-lg bg-[#C9AE69] text-[#F5F2EA] font-semibold hover:brightness-95 transition-all cursor-pointer disabled:opacity-50">{savingConfig ? 'Salvando...' : 'Salvar Configurações'}</button>
                 </div>
               </div>

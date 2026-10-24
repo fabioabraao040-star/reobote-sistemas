@@ -6,6 +6,7 @@ import LandingPage from './components/LandingPage.tsx';
 import Login from './components/Login.tsx';
 import Cadastro from './pages/Cadastro.tsx';
 import ForgotPassword from './pages/ForgotPassword.tsx';
+import ResetPassword from './pages/ResetPassword.tsx';
 import Dashboard from './components/Dashboard.tsx';
 import AtendimentoWhatsApp from './pages/AtendimentoWhatsApp.tsx';
 import Contatos from './pages/Contatos.tsx';
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/cadastro" element={<Cadastro />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Telas Autenticadas */}
           <Route element={<Layout />}>

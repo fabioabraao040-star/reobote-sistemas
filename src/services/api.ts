@@ -1,5 +1,26 @@
 // Helper unificado de chamadas para a API backend do Reobote Sistemas
 
+function toCamelCase(key: string) {
+  return key.replace(/_([a-z0-9])/g, (_, char: string) => char.toUpperCase());
+}
+
+function normalizeKeys(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map(normalizeKeys);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [toCamelCase(key), normalizeKeys(child)])
+    );
+  }
+  return value;
+}
+
+async function parseJson(res: Response) {
+  const data = await res.json();
+  return normalizeKeys(data);
+}
+
 function getAuthHeaders() {
   try {
     const raw = sessionStorage.getItem('reobote_user');
@@ -29,7 +50,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao fazer login.');
     return data;
   },
@@ -40,7 +61,7 @@ export const api = {
       headers: getAuthHeaders(),
     });
     if (!res.ok) throw new Error('Erro ao fazer logout.');
-    return res.json();
+    return parseJson(res);
   },
 
   async register(userData: { name: string; email: string; password: string; companyId?: string }) {
@@ -49,7 +70,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userData),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao cadastrar usuário.');
     return data;
   },
@@ -60,16 +81,44 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: email.trim().toLowerCase() }),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao solicitar recuperação de senha.');
+    return data;
+  },
+
+  async confirmResetPassword(params: { accessToken: string; password: string }) {
+    const res = await fetch('/api/auth/reset-password/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: params.accessToken, password: params.password }),
+    });
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || 'Erro ao redefinir a senha.');
     return data;
   },
 
   // WhatsApp Meta Oficial
   async getWhatsAppConfig() {
     const res = await fetch('/api/whatsapp/config', { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error((await res.json()).error || 'Erro ao obter configurações do WhatsApp');
-    return res.json();
+    if (res.status === 404) {
+      return {
+        connected: false,
+        isVerified: false,
+        phoneNumber: null,
+        phoneNumberId: null,
+        wabaId: null,
+        maskedToken: '',
+        verifiedName: null,
+        webhookUrl: '',
+        verifyToken: '',
+        qualityRating: null,
+        lastChecked: null,
+        hasAccessToken: false,
+      };
+    }
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || 'Erro ao obter configurações do WhatsApp');
+    return data;
   },
 
   async saveWhatsAppConfig(config: {
@@ -84,7 +133,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(config),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao salvar configuração do WhatsApp.');
     return data;
   },
@@ -94,7 +143,7 @@ export const api = {
       method: 'POST',
       headers: getAuthHeaders(),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Falha ao validar credenciais na Meta.');
     return data;
   },
@@ -102,14 +151,14 @@ export const api = {
   async getWhatsAppStatus() {
     const res = await fetch('/api/whatsapp/status', { headers: getAuthHeaders() });
     if (!res.ok) return { connected: false };
-    return res.json();
+    return parseJson(res);
   },
 
   // Contatos
   async getContacts() {
     const res = await fetch('/api/contacts', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Erro ao listar contatos.');
-    return res.json();
+    return parseJson(res);
   },
 
   async createContact(contact: { name: string; phone: string; email?: string; tags?: string[]; notes?: string }) {
@@ -118,7 +167,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(contact),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao cadastrar contato.');
     return data;
   },
@@ -129,7 +178,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(contact),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao atualizar contato.');
     return data;
   },
@@ -139,7 +188,7 @@ export const api = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao excluir contato.');
     return data;
   },
@@ -148,7 +197,7 @@ export const api = {
   async getUsers() {
     const res = await fetch('/api/users', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Erro ao listar usuários.');
-    return res.json();
+    return parseJson(res);
   },
 
   async createUser(user: { name: string; email: string; role: 'admin' | 'user'; companyId?: string }) {
@@ -157,7 +206,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(user),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao criar usuário.');
     return data;
   },
@@ -168,7 +217,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(user),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao atualizar usuário.');
     return data;
   },
@@ -178,7 +227,7 @@ export const api = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao remover usuário.');
     return data;
   },
@@ -187,7 +236,7 @@ export const api = {
   async getAutomations() {
     const res = await fetch('/api/automations', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Erro ao listar automações.');
-    return res.json();
+    return parseJson(res);
   },
 
   async createAutomation(automation: {
@@ -203,7 +252,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(automation),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao salvar automação.');
     return data;
   },
@@ -221,7 +270,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(automation),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao atualizar automação.');
     return data;
   },
@@ -231,7 +280,7 @@ export const api = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao excluir automação.');
     return data;
   },
@@ -240,7 +289,7 @@ export const api = {
   async getQuickReplies() {
     const res = await fetch('/api/quick-replies', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Erro ao listar mensagens prontas.');
-    return res.json();
+    return parseJson(res);
   },
 
   async createQuickReply(reply: { title: string; shortcut?: string; category?: string; content: string }) {
@@ -249,7 +298,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(reply),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao cadastrar resposta rápida.');
     return data;
   },
@@ -260,7 +309,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(reply),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao atualizar resposta rápida.');
     return data;
   },
@@ -270,7 +319,7 @@ export const api = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao remover resposta rápida.');
     return data;
   },
@@ -279,7 +328,7 @@ export const api = {
   async getConversations() {
     const res = await fetch('/api/conversations', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Erro ao listar conversas.');
-    return res.json();
+    return parseJson(res);
   },
 
   async createConversation(conv: { contactId?: string; contactName: string; contactPhone: string; initialMessage?: string }) {
@@ -288,7 +337,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify(conv),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao iniciar conversa.');
     return data;
   },
@@ -296,7 +345,7 @@ export const api = {
   async getMessages(conversationId: string) {
     const res = await fetch(`/api/conversations/${conversationId}/messages`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Erro ao obter mensagens.');
-    return res.json();
+    return parseJson(res);
   },
 
   async sendMessage(conversationId: string, content: string, senderType: 'agent' | 'internal_note' = 'agent') {
@@ -305,7 +354,7 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify({ content, senderType }),
     });
-    const data = await res.json();
+    const data = await parseJson(res);
     if (!res.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
     return data;
   },
@@ -316,13 +365,13 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify({ status }),
     });
-    return res.json();
+    return parseJson(res);
   },
 
   // Dashboard de Atendente
   async getAttendantStats() {
     const res = await fetch('/api/dashboard/attendant-stats', { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Erro ao carregar indicadores do atendente.');
-    return res.json();
+    return parseJson(res);
   },
 };
