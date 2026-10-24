@@ -13,6 +13,9 @@ export interface ConversationStatusMessage {
   conversationId: string;
   senderType: 'customer' | 'agent' | 'system' | 'internal_note';
   createdAt: string | Date;
+  // Mensagens do atendente com status 'failed' não chegaram ao cliente
+  // e por isso não contam como resposta.
+  status?: string | null;
 }
 
 export interface ConversationStatusMeta {
@@ -85,6 +88,11 @@ export function computeConversationVisualStatusMap(
 
   for (const message of messages) {
     if (message.senderType !== 'customer' && message.senderType !== 'agent') {
+      continue;
+    }
+
+    // Envio que falhou na Meta não é resposta válida ao cliente.
+    if (message.senderType === 'agent' && message.status === 'failed') {
       continue;
     }
 

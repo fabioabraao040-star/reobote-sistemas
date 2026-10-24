@@ -30,7 +30,7 @@ interface Message {
   senderName: string;
   content: string;
   createdAt: string;
-  status: 'sent' | 'delivered' | 'read';
+  status: 'sent' | 'delivered' | 'read' | 'failed';
 }
 
 interface QuickReply {
@@ -459,9 +459,16 @@ export default function AtendimentoWhatsApp() {
                       <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] text-[#A0B0BA] select-none">
                         <span>{formatDateTime(msg.createdAt)}</span>
                         {isAgent && (
-                          <span className={`material-symbols-outlined text-[13px] ${msg.status === 'read' ? 'text-[#39AC6B]' : 'text-[#8696A0]'}`} title={msg.status === 'read' ? 'Lida' : 'Entregue'}>
-                            {msg.status === 'read' ? 'done_all' : 'done'}
-                          </span>
+                          msg.status === 'failed' ? (
+                            <span className="flex items-center gap-1 text-[#D14747]" title="Falha no envio pelo WhatsApp">
+                              <span className="material-symbols-outlined text-[13px]">error</span>
+                              <span>Falhou</span>
+                            </span>
+                          ) : (
+                            <span className={`material-symbols-outlined text-[13px] ${msg.status === 'read' ? 'text-[#39AC6B]' : 'text-[#8696A0]'}`} title={msg.status === 'read' ? 'Lida' : 'Entregue'}>
+                              {msg.status === 'read' ? 'done_all' : 'done'}
+                            </span>
+                          )
                         )}
                       </div>
                     </div>

@@ -14,6 +14,16 @@ dotenv.config();
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Validação leve de campos de texto: evita 500 quando o cliente envia
+// número/objeto onde o código espera string (.trim/.toLowerCase).
+function invalidStringField(payload: Record<string, unknown>, fields: string[]): string | null {
+  for (const field of fields) {
+    const value = payload?.[field];
+    if (value !== undefined && typeof value !== 'string') return field;
+  }
+  return null;
+}
+
 const app = express();
 
 // O webhook da Meta exige o corpo bruto (Buffer) para validar a assinatura HMAC.
@@ -38,10 +48,14 @@ app.use(cors({
 app.use(helmet());
 app.use(helmet.crossOriginResourcePolicy({ policy: 'cross-origin' }));
 
-// Rate limiting geral para API
+// Rate limiting geral para API.
+// O webhook da Meta fica fora do limite: ele é autenticado por HMAC e um 429
+// faria a Meta descartar/reenviar eventos legítimos. O polling da tela de
+// atendimento (15s) também exige limite mais alto que 100/15min por IP.
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // máximo 100 requisições por IP por janela de 15 min
+  limit: 300, // máximo 300 requisições por IP por janela de 15 min
+  skip: (req) => req.originalUrl.startsWith('/api/webhook/whatsapp'),
   message: { error: 'Muitas requisições. Tente novamente mais tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -288,6 +302,11 @@ app.post('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req
 
   const { phoneNumber, phoneNumberId, wabaId, accessToken, verifyToken } = req.body;
 
+  const invalidField = invalidStringField(req.body, ['phoneNumber', 'phoneNumberId', 'wabaId', 'accessToken', 'verifyToken']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!phoneNumber || !phoneNumberId || !wabaId) {
     return res.status(400).json({ error: 'Número oficial, Phone Number ID e WABA ID são obrigatórios.' });
   }
@@ -521,8 +540,12 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
   hmac.update(rawBody);
   const expectedSignature = `sha256=${hmac.digest('hex')}`;
 
-  const sig = String(signature);
-  if (sig.length !== expectedSignature.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSignature))) {
+  const providedSignature = Buffer.from(String(signature));
+  const expectedSignatureBuffer = Buffer.from(expectedSignature);
+  if (
+    providedSignature.length !== expectedSignatureBuffer.length ||
+    !crypto.timingSafeEqual(providedSignature, expectedSignatureBuffer)
+  ) {
     return res.status(401).send('Assinatura inválida.');
   }
 
@@ -631,7 +654,7 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
 
           const { data: existingConv } = await supabase
             .from('conversations')
-            .select('*')
+            .select('id, unread_count')
             .eq('company_id', companyId)
             .eq('contact_id', contact.id)
             .in('status', ['open', 'in_progress'])
@@ -640,17 +663,9 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
             .maybeSingle();
 
           let conversationId: string | null = existingConv?.id || null;
+          let isNewConversation = false;
 
-          if (conversationId && existingConv) {
-            await supabase
-              .from('conversations')
-              .update({
-                last_message: content,
-                last_message_at: now,
-                unread_count: (existingConv.unread_count || 0) + 1,
-              })
-              .eq('id', conversationId);
-          } else {
+          if (!conversationId) {
             const { data: newConv, error: convError } = await supabase
               .from('conversations')
               .insert({
@@ -659,7 +674,7 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
                 status: 'open',
                 last_message: content,
                 last_message_at: now,
-                unread_count: 1,
+                unread_count: 0,
               })
               .select('id')
               .single();
@@ -669,8 +684,12 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
               continue;
             }
             conversationId = newConv.id;
+            isNewConversation = true;
           }
 
+          // Insere a mensagem ANTES de contabilizar não-lidas. Se a Meta
+          // reenviar o mesmo evento, o índice único em whatsapp_message_id
+          // rejeita a duplicata e o contador da conversa não é incrementado.
           const { error: messageError } = await supabase.from('messages').insert({
             conversation_id: conversationId,
             sender_type: 'customer',
@@ -680,8 +699,21 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
           });
 
           if (messageError) {
+            if (messageError.code === '23505') {
+              continue; // duplicata concorrente: conversa permanece intacta
+            }
             console.error('[Meta Webhook] Erro ao salvar mensagem:', messageError.message);
+            continue;
           }
+
+          await supabase
+            .from('conversations')
+            .update({
+              last_message: content,
+              last_message_at: now,
+              unread_count: isNewConversation ? 1 : (existingConv?.unread_count || 0) + 1,
+            })
+            .eq('id', conversationId);
         }
 
         // Atualizações de entrega/leitura das mensagens enviadas
@@ -733,11 +765,21 @@ app.post('/api/contacts', authMiddleware, async (req: AuthenticatedRequest, res)
   }
 
   const { name, phone, email, tags, notes } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['name', 'phone', 'email', 'notes', 'companyId']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!name || !phone) {
     return res.status(400).json({ error: 'Nome e telefone são obrigatórios.' });
   }
 
   const companyId = req.authRole === 'admin' && req.body.companyId ? req.body.companyId : req.authCompanyId;
+
+  if (!companyId || !UUID_REGEX.test(String(companyId))) {
+    return res.status(400).json({ error: 'Empresa inválida.' });
+  }
 
   const { data, error } = await supabase
     .from('contacts')
@@ -779,6 +821,11 @@ app.put('/api/contacts/:id', authMiddleware, async (req: AuthenticatedRequest, r
   }
 
   const { name, phone, email, tags, notes } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['name', 'phone', 'email', 'notes']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
 
   const { data, error } = await supabase
     .from('contacts')
@@ -856,6 +903,12 @@ app.post('/api/users', authMiddleware, adminOnlyMiddleware, async (req: Authenti
   }
 
   const { name, email, role, companyId } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['name', 'email', 'role', 'companyId']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!name || !email) {
     return res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
   }
@@ -960,6 +1013,11 @@ app.put('/api/users/:id', authMiddleware, adminOnlyMiddleware, async (req: Authe
   }
 
   const { name, email, role, status } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['name', 'email', 'role', 'status']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
 
   if (name === undefined && email === undefined && role === undefined && status === undefined) {
     return res.status(400).json({ error: 'Informe ao menos um campo para atualizar.' });
@@ -1100,6 +1158,12 @@ app.post('/api/automations', authMiddleware, async (req: AuthenticatedRequest, r
   }
 
   const { name, triggerType, triggerValue, actionType, actionPayload, isActive } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['name', 'triggerType', 'triggerValue', 'actionType', 'actionPayload']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!name || !actionPayload) {
     return res.status(400).json({ error: 'Nome e mensagem de ação são obrigatórios.' });
   }
@@ -1145,6 +1209,11 @@ app.put('/api/automations/:id', authMiddleware, async (req: AuthenticatedRequest
   }
 
   const { name, triggerType, triggerValue, actionType, actionPayload, isActive } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['name', 'triggerType', 'triggerValue', 'actionType', 'actionPayload']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
 
   const { data, error } = await supabase
     .from('automations')
@@ -1223,6 +1292,12 @@ app.post('/api/quick-replies', authMiddleware, async (req: AuthenticatedRequest,
   }
 
   const { title, shortcut, category, content } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['title', 'shortcut', 'category', 'content']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!title || !content) {
     return res.status(400).json({ error: 'Título e conteúdo da mensagem são obrigatórios.' });
   }
@@ -1270,6 +1345,11 @@ app.put('/api/quick-replies/:id', authMiddleware, async (req: AuthenticatedReque
   }
 
   const { title, shortcut, category, content } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['title', 'shortcut', 'category', 'content']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
 
   const { data, error } = await supabase
     .from('quick_replies')
@@ -1337,6 +1417,7 @@ async function loadConversationVisualStatuses(
     conversationId: string;
     senderType: 'customer' | 'agent' | 'system' | 'internal_note';
     createdAt: string;
+    status?: string | null;
   }> = [];
 
   // Consulta em blocos para não estourar o tamanho da URL do PostgREST.
@@ -1345,7 +1426,7 @@ async function loadConversationVisualStatuses(
     const chunk = ids.slice(index, index + CHUNK_SIZE);
     const { data, error } = await supabase
       .from('messages')
-      .select('conversation_id, sender_type, created_at')
+      .select('conversation_id, sender_type, created_at, status')
       .in('conversation_id', chunk);
 
     if (error) {
@@ -1363,11 +1444,78 @@ async function loadConversationVisualStatuses(
         conversationId: message.conversation_id,
         senderType: message.sender_type as 'customer' | 'agent' | 'system' | 'internal_note',
         createdAt: message.created_at,
+        status: message.status,
       });
     }
   }
 
   return computeConversationVisualStatusMap(ids, messages, unreadCounts);
+}
+
+// ============================================================================
+// DESPACHO OFICIAL PELA META CLOUD API (exclusivamente no backend)
+// ============================================================================
+
+// Retorna credencial apenas quando o WhatsApp está conectado e validado.
+// Nunca devolve token ao cliente — é uso interno das rotas.
+async function getWhatsAppDispatchConfig(): Promise<{ phoneNumberId: string; accessToken: string } | null> {
+  if (!supabase) return null;
+
+  const { data: cfg } = await supabase
+    .from('whatsapp_configs')
+    .select('phone_number_id, access_token, is_verified')
+    .limit(1)
+    .maybeSingle();
+
+  if (!cfg?.is_verified || !cfg.access_token || !cfg.phone_number_id) {
+    return null;
+  }
+
+  return { phoneNumberId: cfg.phone_number_id, accessToken: cfg.access_token };
+}
+
+type WhatsAppDispatchResult =
+  | { ok: true; messageId: string | null }
+  | { ok: false; error: string };
+
+// Envia texto pela Graph API e devolve o ID real da mensagem na Meta.
+// Só retorna ok:true quando a Meta responde HTTP 2xx — nunca presumir sucesso.
+async function dispatchWhatsAppText(params: {
+  phoneNumberId: string;
+  accessToken: string;
+  to: string;
+  body: string;
+}): Promise<WhatsAppDispatchResult> {
+  try {
+    const response = await fetch(`https://graph.facebook.com/v20.0/${params.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: params.to,
+        type: 'text',
+        text: { preview_url: false, body: params.body },
+      }),
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      // A mensagem de erro da Meta não contém o token; não expor detalhes internos.
+      return {
+        ok: false,
+        error: data?.error?.message || `A Meta recusou o envio (HTTP ${response.status}).`,
+      };
+    }
+
+    return { ok: true, messageId: data?.messages?.[0]?.id || null };
+  } catch {
+    return { ok: false, error: 'Falha de rede ao contatar a Meta. Mensagem não enviada.' };
+  }
 }
 
 // 6. Conversas e Mensagens (Atendimento WhatsApp)
@@ -1408,6 +1556,12 @@ app.post('/api/conversations', authMiddleware, async (req: AuthenticatedRequest,
   }
 
   const { contactId, contactName, contactPhone, initialMessage } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['contactId', 'contactName', 'contactPhone', 'initialMessage']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!contactName || !contactPhone) {
     return res.status(400).json({ error: 'Nome e telefone do contato são obrigatórios.' });
   }
@@ -1467,27 +1621,70 @@ app.post('/api/conversations', authMiddleware, async (req: AuthenticatedRequest,
     return res.status(500).json({ error: 'Erro ao criar conversa.' });
   }
 
-  if (initialMessage && initialMessage.trim()) {
-    await supabase.from('messages').insert({
-      conversation_id: newConv.id,
-      sender_type: 'agent',
-      sender_id: req.authUserId,
-      content: initialMessage.trim(),
-      status: 'sent',
-    });
-  }
-
   const { data: conversationContact } = await supabase
     .from('contacts')
     .select('name, phone')
     .eq('id', contactIdFinal)
     .single();
 
+  let dispatchError: string | null = null;
+
+  if (initialMessage && initialMessage.trim()) {
+    const trimmedMessage = initialMessage.trim();
+    const { data: initialMsg } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: newConv.id,
+        sender_type: 'agent',
+        sender_id: req.authUserId,
+        content: trimmedMessage,
+        status: 'sent',
+      })
+      .select('id')
+      .single();
+
+    // Mensagem inicial também passa pela Meta quando há conexão validada.
+    // Se falhar, fica persistida como 'failed' e o cliente é informado.
+    if (initialMsg) {
+      const cfg = await getWhatsAppDispatchConfig();
+      if (cfg) {
+        const cleanTo = (conversationContact?.phone || contactPhone || '').replace(/\D/g, '');
+
+        if (!cleanTo) {
+          dispatchError = 'O contato não possui telefone válido.';
+        } else {
+          const result = await dispatchWhatsAppText({
+            phoneNumberId: cfg.phoneNumberId,
+            accessToken: cfg.accessToken,
+            to: cleanTo,
+            body: trimmedMessage,
+          });
+
+          if (result.ok) {
+            if (result.messageId) {
+              await supabase
+                .from('messages')
+                .update({ whatsapp_message_id: result.messageId })
+                .eq('id', initialMsg.id);
+            }
+          } else {
+            dispatchError = result.error;
+          }
+        }
+
+        if (dispatchError) {
+          await supabase.from('messages').update({ status: 'failed' }).eq('id', initialMsg.id);
+        }
+      }
+    }
+  }
+
   res.status(201).json({
     ...newConv,
     contact_name: conversationContact?.name || contactName.trim(),
     contact_phone: conversationContact?.phone || contactPhone.trim(),
     assigned_name: req.authUserName || null,
+    ...(dispatchError ? { dispatchError } : {}),
   });
 });
 
@@ -1552,7 +1749,7 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
   }
 
   const { content, senderType } = req.body;
-  if (!content || !content.trim()) {
+  if (typeof content !== 'string' || !content.trim()) {
     return res.status(400).json({ error: 'O conteúdo da mensagem é obrigatório.' });
   }
 
@@ -1586,42 +1783,54 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
       })
       .eq('id', conv.id);
 
-    // Se houver credencial oficial do WhatsApp conectada, despacha para a Meta Cloud API
-    const { data: cfg } = await supabase
-      .from('whatsapp_configs')
-      .select('*')
-      .limit(1)
-      .single();
+    // Se houver credencial oficial conectada, despacha para a Meta e só
+    // considera enviada quando a API responde 2xx (com o ID real da Meta).
+    const cfg = await getWhatsAppDispatchConfig();
 
-    if (cfg?.is_verified && cfg.access_token && cfg.phone_number_id) {
-      try {
-        // Precisamos buscar o telefone do contato
-        const { data: contact } = await supabase
-          .from('contacts')
-          .select('phone')
-          .eq('id', conv.contact_id)
-          .single();
+    if (cfg) {
+      const { data: contact } = await supabase
+        .from('contacts')
+        .select('phone')
+        .eq('id', conv.contact_id)
+        .single();
 
-        const cleanTo = contact?.phone?.replace(/\D/g, '') || '';
+      const cleanTo = contact?.phone?.replace(/\D/g, '') || '';
 
-        if (cleanTo) {
-          await fetch(`https://graph.facebook.com/v20.0/${cfg.phone_number_id}/messages`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${cfg.access_token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              recipient_type: 'individual',
-              to: cleanTo,
-              type: 'text',
-              text: { preview_url: false, body: content.trim() },
-            }),
-          });
+      let dispatchError: string | null = null;
+
+      if (!cleanTo) {
+        dispatchError = 'O contato não possui telefone válido.';
+      } else {
+        const result = await dispatchWhatsAppText({
+          phoneNumberId: cfg.phoneNumberId,
+          accessToken: cfg.accessToken,
+          to: cleanTo,
+          body: content.trim(),
+        });
+
+        if (result.ok) {
+          if (result.messageId) {
+            await supabase
+              .from('messages')
+              .update({ whatsapp_message_id: result.messageId, status: 'sent' })
+              .eq('id', newMsg.id);
+            newMsg.whatsapp_message_id = result.messageId;
+          }
+        } else {
+          dispatchError = result.error;
         }
-      } catch (e) {
-        console.error('[WhatsApp Dispatch] Erro ao enviar para Meta:', e);
+      }
+
+      if (dispatchError) {
+        // Falha comprovada: persistir como 'failed' e responder erro ao cliente,
+        // em vez de devolver 201 com uma mensagem que nunca saiu do servidor.
+        await supabase.from('messages').update({ status: 'failed' }).eq('id', newMsg.id);
+        newMsg.status = 'failed';
+        return res.status(502).json({
+          error: `Não foi possível enviar pelo WhatsApp: ${dispatchError}`,
+          messageId: newMsg.id,
+          status: 'failed',
+        });
       }
     }
   }
@@ -1819,6 +2028,12 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   const { email, password } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['email', 'password']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!email || !password) {
     return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
   }
@@ -1872,6 +2087,12 @@ app.post('/api/auth/register', async (req, res) => {
   }
 
   const { name, email, password, companyId } = req.body;
+
+  const invalidField = invalidStringField(req.body, ['name', 'email', 'password', 'companyId']);
+  if (invalidField) {
+    return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
+  }
+
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios.' });
   }
@@ -1991,7 +2212,8 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 
   const { email } = req.body;
-  if (!email) {
+
+  if (typeof email !== 'string' || !email) {
     return res.status(400).json({ error: 'E-mail é obrigatório.' });
   }
 
@@ -2056,10 +2278,12 @@ app.post('/api/auth/reset-password/confirm', async (req, res) => {
 app.get('/api/diag', async (req, res) => {
   const expected = process.env.DIAG_TOKEN || '';
   const provided = req.header('x-diag-token') || '';
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
   const ok =
     expected.length > 0 &&
-    provided.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+    providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 
   if (!ok) {
     return res.status(404).json({ error: 'Rota da API não encontrada.' });
@@ -2103,10 +2327,12 @@ app.get('/api/diag', async (req, res) => {
 app.post('/api/diag/create-admin', async (req, res) => {
   const expected = process.env.DIAG_TOKEN || '';
   const provided = req.header('x-diag-token') || '';
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
   const ok =
     expected.length > 0 &&
-    provided.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+    providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 
   if (!ok) {
     return res.status(404).json({ error: 'Rota da API não encontrada.' });
