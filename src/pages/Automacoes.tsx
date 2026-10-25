@@ -147,19 +147,19 @@ export default function Automacoes() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${isAdmin ? 'bg-[#EFA339]/10 text-[#EFA339] border border-[#EFA339]/30' : 'bg-[#C9AE69]/10 text-[#C9AE69] border border-[#C9AE69]/30'}`}>
+            <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${isAdmin ? 'bg-[#EFA339]/10 text-[#F5C26B] border border-[#EFA339]/30' : 'bg-[#263744] text-[#D0B783] border border-[#D0B783]/30'}`}>
               Operacional
             </span>
           </div>
-          <h1 className="text-xl font-bold text-[#F5F2EA] tracking-tight">Automações e Fluxos de Atendimento</h1>
-          <p className="text-sm text-[#A0B0BA]">Configure respostas automáticas, triagens e mensagens fora do expediente no WhatsApp</p>
+          <h1 className="text-xl font-bold text-[#E1E8EC] tracking-tight">Automações e Fluxos de Atendimento</h1>
+          <p className="text-sm text-[#B4C5CE]">Configure respostas automáticas, triagens e mensagens fora do expediente no WhatsApp</p>
         </div>
         <div className="flex items-center gap-3">
-          <Link to="/dashboard" className="text-xs font-semibold text-[#C9AE69] hover:text-[#E0C98F] flex items-center gap-1 transition-colors">
+          <Link to="/dashboard" className="text-xs font-semibold text-[#D0B783] hover:text-[#E1E8EC] flex items-center gap-1 transition-colors">
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             <span>Voltar ao Dashboard</span>
           </Link>
-          <button type="button" onClick={handleOpenCreateModal} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#C9AE69] text-[#F5F2EA] text-xs font-semibold hover:brightness-95 transition-all shadow-xs cursor-pointer">
+          <button type="button" onClick={handleOpenCreateModal} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs cursor-pointer">
             <span className="material-symbols-outlined text-[18px]">add_circle</span>
             <span>Criar Nova Automação</span>
           </button>
@@ -167,48 +167,48 @@ export default function Automacoes() {
       </div>
 
       {successMessage && (
-        <div className="p-3.5 rounded-lg bg-[#39AC6B]/10 border border-[#39AC6B]/30 text-[#39AC6B]/90 text-xs font-medium flex items-center justify-between">
+        <div className="p-3.5 rounded-lg bg-[#39AC6B]/10 border border-[#39AC6B]/30 text-[#8FE3AC] text-xs font-medium flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px] text-[#39AC6B]">check_circle</span>
+            <span className="material-symbols-outlined text-[18px] text-[#8FE3AC]">check_circle</span>
             <span>{successMessage}</span>
           </div>
-          <button type="button" onClick={() => setSuccessMessage(null)} className="text-[#39AC6B] hover:text-[#39AC6B] font-bold">✕</button>
+          <button type="button" onClick={() => setSuccessMessage(null)} className="text-[#8FE3AC] hover:text-[#8FE3AC] font-bold">✕</button>
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {loading ? (
-          <div className="col-span-2 p-8 text-center text-xs text-[#A0B0BA] bg-[#17374A] rounded-xl border border-[#2B3D50]">Carregando fluxos automáticos...</div>
+          <div className="col-span-2 p-8 text-center text-xs text-[#B4C5CE] bg-[#344956] rounded-xl border border-[#526673]">Carregando fluxos automáticos...</div>
         ) : automations.length === 0 ? (
-          <div className="col-span-2 p-8 text-center text-xs text-[#A0B0BA] bg-[#17374A] rounded-xl border border-[#2B3D50]">Nenhuma automação cadastrada. Crie seu primeiro fluxo no botão acima.</div>
+          <div className="col-span-2 p-8 text-center text-xs text-[#B4C5CE] bg-[#344956] rounded-xl border border-[#526673]">Nenhuma automação cadastrada. Crie seu primeiro fluxo no botão acima.</div>
         ) : (
           automations.map((auto) => (
-            <div key={auto.id} className={`p-5 rounded-xl border bg-[#17374A] shadow-[0_2px_8px_-2px_rgba(52,68,92,0.05)] flex flex-col justify-between transition-all ${auto.isActive ? 'border-[#2B3D50]' : 'border-[#2B3D50]/60 opacity-70'}`}>
+            <div key={auto.id} className={`p-5 rounded-xl border bg-[#344956] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.18)] flex flex-col justify-between transition-all ${auto.isActive ? 'border-[#526673]' : 'border-[#526673]/60 opacity-70'}`}>
               <div>
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white ${auto.isActive ? 'bg-[#C9AE69]' : 'bg-[#A0B0BA]/20'}`}>
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white ${auto.isActive ? 'bg-[#527D91]' : 'bg-[#B4C5CE]/20'}`}>
                       <span className="material-symbols-outlined text-[20px]">{auto.triggerType === 'welcome' ? 'waving_hand' : auto.triggerType === 'out_of_hours' ? 'schedule' : 'smart_toy'}</span>
                     </div>
                     <div>
-                      <h3 className="font-bold text-sm text-[#F5F2EA]">{auto.name}</h3>
-                      <span className="text-[11px] text-[#A0B0BA]">{auto.triggerType === 'welcome' ? 'Primeiro Contato' : auto.triggerType === 'out_of_hours' ? 'Fora de Horário' : 'Palavra-chave'}</span>
+                      <h3 className="font-bold text-sm text-[#E1E8EC]">{auto.name}</h3>
+                      <span className="text-[11px] text-[#B4C5CE]">{auto.triggerType === 'welcome' ? 'Primeiro Contato' : auto.triggerType === 'out_of_hours' ? 'Fora de Horário' : 'Palavra-chave'}</span>
                     </div>
                   </div>
-                  <button type="button" onClick={() => handleToggleActive(auto)} className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${auto.isActive ? 'bg-[#39AC6B]' : 'bg-[#A0B0BA]/20'}`} title={auto.isActive ? 'Desativar automação' : 'Ativar automação'}>
-                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-[#17374A] shadow-sm ring-0 transition duration-200 ease-in-out ${auto.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+                  <button type="button" onClick={() => handleToggleActive(auto)} className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${auto.isActive ? 'bg-[#39AC6B]' : 'bg-[#B4C5CE]/20'}`} title={auto.isActive ? 'Desativar automação' : 'Ativar automação'}>
+                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-[#E1E8EC] shadow-sm ring-0 transition duration-200 ease-in-out ${auto.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
                   </button>
                 </div>
-                <div className="p-3 bg-[#101D2D] rounded-lg border border-[#2B3D50] text-xs text-[#F5F2EA] mb-4">
-                  <p className="font-semibold text-[#A0B0BA] text-[10px] uppercase mb-1">Mensagem Automática:</p>
+                <div className="p-3 bg-[#263744] rounded-lg border border-[#526673] text-xs text-[#E1E8EC] mb-4">
+                  <p className="font-semibold text-[#B4C5CE] text-[10px] uppercase mb-1">Mensagem Automática:</p>
                   <p className="line-clamp-3 italic">{auto.actionPayload}</p>
                 </div>
               </div>
-              <div className="flex items-center justify-between pt-3 border-t border-[#2B3D50] text-xs text-[#A0B0BA]">
+              <div className="flex items-center justify-between pt-3 border-t border-[#526673] text-xs text-[#B4C5CE]">
                 <span className="text-[11px]">Status: <strong>{auto.isActive ? 'Operacional' : 'Pausada'}</strong></span>
                 <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => handleOpenEditModal(auto)} className="p-1 hover:text-[#F5F2EA] cursor-pointer" title="Editar"><span className="material-symbols-outlined text-[18px]">edit</span></button>
-                  <button type="button" onClick={() => setDeletingId(auto.id)} className="p-1 hover:text-[#D14747] cursor-pointer" title="Excluir"><span className="material-symbols-outlined text-[18px]">delete</span></button>
+                  <button type="button" onClick={() => handleOpenEditModal(auto)} className="p-1 hover:text-[#E1E8EC] cursor-pointer" title="Editar"><span className="material-symbols-outlined text-[18px]">edit</span></button>
+                  <button type="button" onClick={() => setDeletingId(auto.id)} className="p-1 hover:text-[#FFA8A8] cursor-pointer" title="Excluir"><span className="material-symbols-outlined text-[18px]">delete</span></button>
                 </div>
               </div>
             </div>
@@ -216,23 +216,23 @@ export default function Automacoes() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-[#17374A]/50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-[#17374A] rounded-xl shadow-2xl border border-[#2B3D50] max-w-md w-full p-6 animate-fadeIn">
-            <div className="flex items-center justify-between pb-3 border-b border-[#2B3D50] mb-4">
-              <h3 className="font-bold text-base text-[#F5F2EA]">{editingAuto ? 'Editar Automação' : 'Criar Nova Automação'}</h3>
-              <button type="button" onClick={() => setShowModal(false)} className="text-[#A0B0BA] hover:text-[#F5F2EA] cursor-pointer"><span className="material-symbols-outlined text-[20px]">close</span></button>
+        <div className="fixed inset-0 z-50 bg-[#263744]/75 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-[#344956] rounded-xl shadow-2xl border border-[#526673] max-w-md w-full p-6 animate-fadeIn">
+            <div className="flex items-center justify-between pb-3 border-b border-[#526673] mb-4">
+              <h3 className="font-bold text-base text-[#E1E8EC]">{editingAuto ? 'Editar Automação' : 'Criar Nova Automação'}</h3>
+              <button type="button" onClick={() => setShowModal(false)} className="text-[#B4C5CE] hover:text-[#E1E8EC] cursor-pointer"><span className="material-symbols-outlined text-[20px]">close</span></button>
             </div>
             {formError && (
-              <div className="mb-4 p-3 rounded-lg bg-[#D14747]/10 border border-[#D14747]/30 text-[#D14747]/90 text-xs">{formError}</div>
+              <div className="mb-4 p-3 rounded-lg bg-[#D14747]/10 border border-[#D14747]/30 text-[#FFA8A8] text-xs">{formError}</div>
             )}
             <form onSubmit={handleSaveAutomation} className="space-y-3.5 text-xs text-left">
               <div>
-                <label className="font-semibold text-[#F5F2EA] block mb-1">Nome da Automação *</label>
-                <input type="text" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Boas-vindas Inicial WhatsApp" className="w-full px-3 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] outline-none focus:border-[#C9AE69]" />
+                <label className="font-semibold text-[#E1E8EC] block mb-1">Nome da Automação *</label>
+                <input type="text" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Boas-vindas Inicial WhatsApp" className="w-full px-3 py-2 rounded-lg border border-[#526673] text-[#E1E8EC] outline-none focus:border-[#527D91]" />
               </div>
               <div>
-                <label className="font-semibold text-[#F5F2EA] block mb-1">Tipo de Gatilho</label>
-                <select value={triggerType} onChange={(e) => setTriggerType(e.target.value as any)} className="w-full px-3 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] outline-none focus:border-[#C9AE69] bg-[#17374A] cursor-pointer">
+                <label className="font-semibold text-[#E1E8EC] block mb-1">Tipo de Gatilho</label>
+                <select value={triggerType} onChange={(e) => setTriggerType(e.target.value as any)} className="w-full px-3 py-2 rounded-lg border border-[#526673] text-[#E1E8EC] outline-none focus:border-[#527D91] bg-[#2D404D] cursor-pointer">
                   <option value="welcome">Primeiro contato do cliente (Boas-vindas)</option>
                   <option value="out_of_hours">Mensagem recebida fora de expediente</option>
                   <option value="keyword">Contém palavra-chave específica</option>
@@ -241,17 +241,17 @@ export default function Automacoes() {
               </div>
               {triggerType === 'keyword' && (
                 <div>
-                  <label className="font-semibold text-[#F5F2EA] block mb-1">Palavra-chave</label>
-                  <input type="text" value={triggerValue} onChange={(e) => setTriggerValue(e.target.value)} placeholder="Ex.: suporte, tabela, orcamento" className="w-full px-3 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] outline-none focus:border-[#C9AE69]" />
+                  <label className="font-semibold text-[#E1E8EC] block mb-1">Palavra-chave</label>
+                  <input type="text" value={triggerValue} onChange={(e) => setTriggerValue(e.target.value)} placeholder="Ex.: suporte, tabela, orcamento" className="w-full px-3 py-2 rounded-lg border border-[#526673] text-[#E1E8EC] outline-none focus:border-[#527D91]" />
                 </div>
               )}
               <div>
-                <label className="font-semibold text-[#F5F2EA] block mb-1">Texto da Resposta Automática *</label>
-                <textarea rows={4} required value={actionPayload} onChange={(e) => setActionPayload(e.target.value)} placeholder="Mensagem disparada automaticamente para o cliente no WhatsApp..." className="w-full px-3 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] outline-none focus:border-[#C9AE69]" />
+                <label className="font-semibold text-[#E1E8EC] block mb-1">Texto da Resposta Automática *</label>
+                <textarea rows={4} required value={actionPayload} onChange={(e) => setActionPayload(e.target.value)} placeholder="Mensagem disparada automaticamente para o cliente no WhatsApp..." className="w-full px-3 py-2 rounded-lg border border-[#526673] text-[#E1E8EC] outline-none focus:border-[#527D91]" />
               </div>
-              <div className="pt-3 border-t border-[#2B3D50] flex items-center justify-end gap-2">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] hover:bg-[#101D2D] font-semibold cursor-pointer">Cancelar</button>
-                <button type="submit" disabled={submitting} className="px-4 py-2 rounded-lg bg-[#C9AE69] text-[#F5F2EA] font-semibold hover:brightness-95 transition-all cursor-pointer disabled:opacity-50">{submitting ? 'Salvando...' : editingAuto ? 'Atualizar Automação' : 'Salvar Automação'}</button>
+              <div className="pt-3 border-t border-[#526673] flex items-center justify-end gap-2">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 rounded-lg border border-[#526673] text-[#E1E8EC] hover:bg-[#263744] font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" disabled={submitting} className="px-4 py-2 rounded-lg bg-[#527D91] text-white font-semibold hover:brightness-95 transition-all cursor-pointer disabled:opacity-50">{submitting ? 'Salvando...' : editingAuto ? 'Atualizar Automação' : 'Salvar Automação'}</button>
               </div>
             </form>
           </div>
@@ -259,14 +259,14 @@ export default function Automacoes() {
       )}
 
       {deletingId && (
-        <div className="fixed inset-0 z-50 bg-[#17374A]/50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-[#17374A] rounded-xl shadow-2xl border border-[#D14747]/30 max-w-sm w-full p-6 text-center animate-fadeIn">
-            <div className="w-12 h-12 rounded-full bg-[#D14747]/10 text-[#D14747] flex items-center justify-center mx-auto mb-3"><span className="material-symbols-outlined text-[24px]">delete</span></div>
-            <h3 className="font-bold text-base text-[#F5F2EA] mb-2">Confirmar Exclusão de Automação</h3>
-            <p className="text-xs text-[#A0B0BA] mb-6">Tem certeza de que deseja remover este fluxo automático?</p>
+        <div className="fixed inset-0 z-50 bg-[#263744]/75 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-[#344956] rounded-xl shadow-2xl border border-[#D14747]/30 max-w-sm w-full p-6 text-center animate-fadeIn">
+            <div className="w-12 h-12 rounded-full bg-[#D14747]/10 text-[#FFA8A8] flex items-center justify-center mx-auto mb-3"><span className="material-symbols-outlined text-[24px]">delete</span></div>
+            <h3 className="font-bold text-base text-[#E1E8EC] mb-2">Confirmar Exclusão de Automação</h3>
+            <p className="text-xs text-[#B4C5CE] mb-6">Tem certeza de que deseja remover este fluxo automático?</p>
             <div className="flex items-center justify-center gap-3 text-xs">
-              <button type="button" onClick={() => setDeletingId(null)} className="px-4 py-2 rounded-lg border border-[#2B3D50] text-[#F5F2EA] font-semibold hover:bg-[#101D2D] cursor-pointer">Cancelar</button>
-              <button type="button" onClick={() => handleDelete(deletingId)} className="px-4 py-2 rounded-lg bg-[#D14747] text-[#F5F2EA] font-semibold hover:bg-[#B53A3A] transition-colors cursor-pointer">Sim, Excluir</button>
+              <button type="button" onClick={() => setDeletingId(null)} className="px-4 py-2 rounded-lg border border-[#526673] text-[#E1E8EC] font-semibold hover:bg-[#263744] cursor-pointer">Cancelar</button>
+              <button type="button" onClick={() => handleDelete(deletingId)} className="px-4 py-2 rounded-lg bg-[#B53A3A] text-white font-semibold hover:bg-[#9E3030] transition-colors cursor-pointer">Sim, Excluir</button>
             </div>
           </div>
         </div>

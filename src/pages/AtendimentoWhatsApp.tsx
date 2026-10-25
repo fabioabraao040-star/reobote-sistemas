@@ -259,31 +259,31 @@ export default function AtendimentoWhatsApp() {
   const showChat = Boolean(selectedConversation);
 
   return (
-    <div className="h-full min-h-[480px] flex flex-col bg-[#101D2D] rounded-xl border border-[#2B3D50] shadow-[0_2px_8px_-2px_rgba(52,68,92,0.05)] overflow-hidden">
+    <div className="h-full min-h-[480px] flex flex-col bg-[#263744] rounded-xl border border-[#526673] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.18)] overflow-hidden">
       <div className="flex-1 flex min-h-0 overflow-hidden">
         
         {/* Coluna 1: Fila de Atendimento */}
         {showList && (
-          <div className="w-full lg:w-80 lg:border-r border-[#2B3D50] flex flex-col bg-[#101D2D]/60 flex-shrink-0">
+          <div className="w-full lg:w-80 lg:border-r border-[#526673] flex flex-col bg-[#263744]/60 flex-shrink-0">
 
             {/* Cabeçalho da Fila e Filtro */}
-            <div className="p-3.5 border-b border-[#2B3D50] bg-[#17374A]">
+            <div className="p-3.5 border-b border-[#526673] bg-[#344956]">
               <div className="flex items-center justify-between mb-2.5">
-                <span className="font-bold text-xs uppercase tracking-wider text-[#F5F2EA]">
+                <span className="font-bold text-xs uppercase tracking-wider text-[#E1E8EC]">
                   Fila de Atendimento
                 </span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-[#C9AE69]/15 text-[#C9AE69] font-bold">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-[#263744] text-[#D0B783] font-bold">
                   {conversations.length} {conversations.length === 1 ? 'conversa' : 'conversas'}
                 </span>
               </div>
 
               {/* Abas de Filtro de Status */}
-              <div className="overflow-x-auto space-x-1 p-1 bg-[#101D2D] rounded-lg text-[10px] font-semibold text-center">
+              <div className="overflow-x-auto space-x-1 p-1 bg-[#263744] rounded-lg text-[10px] font-semibold text-center">
                 <button
                   type="button"
                   onClick={() => setFilterStatus('all')}
                   className={`whitespace-nowrap py-1 px-2 rounded cursor-pointer transition-colors ${
-                    filterStatus === 'all' ? 'bg-[#17374A] text-[#F5F2EA] shadow-xs' : 'text-[#A0B0BA]'
+                    filterStatus === 'all' ? 'bg-[#527D91] text-white shadow-xs' : 'text-[#B4C5CE]'
                   }`}
                 >
                   Todas
@@ -292,7 +292,7 @@ export default function AtendimentoWhatsApp() {
                   type="button"
                   onClick={() => setFilterStatus('open')}
                   className={`whitespace-nowrap py-1 px-2 rounded cursor-pointer transition-colors ${
-                    filterStatus === 'open' ? 'bg-[#17374A] text-[#EFA339]/90 shadow-xs' : 'text-[#A0B0BA]'
+                    filterStatus === 'open' ? 'bg-[#527D91] text-white shadow-xs' : 'text-[#B4C5CE]'
                   }`}
                 >
                   Abertas
@@ -301,7 +301,7 @@ export default function AtendimentoWhatsApp() {
                   type="button"
                   onClick={() => setFilterStatus('in_progress')}
                   className={`whitespace-nowrap py-1 px-2 rounded cursor-pointer transition-colors ${
-                    filterStatus === 'in_progress' ? 'bg-[#17374A] text-[#39AC6B]/90 shadow-xs' : 'text-[#A0B0BA]'
+                    filterStatus === 'in_progress' ? 'bg-[#527D91] text-white shadow-xs' : 'text-[#B4C5CE]'
                   }`}
                 >
                   Em curso
@@ -310,7 +310,7 @@ export default function AtendimentoWhatsApp() {
                   type="button"
                   onClick={() => setFilterStatus('closed')}
                   className={`whitespace-nowrap py-1 px-2 rounded cursor-pointer transition-colors ${
-                    filterStatus === 'closed' ? 'bg-[#17374A] text-[#39AC6B]/90 shadow-xs' : 'text-[#A0B0BA]'
+                    filterStatus === 'closed' ? 'bg-[#527D91] text-white shadow-xs' : 'text-[#B4C5CE]'
                   }`}
                 >
                   Resolvidas
@@ -322,16 +322,16 @@ export default function AtendimentoWhatsApp() {
             </div>
 
             {/* Lista de Conversas */}
-            <div className="flex-1 overflow-y-auto divide-y divide-[#2B3D50]">
+            <div className="flex-1 overflow-y-auto divide-y divide-[#526673]">
               {loading ? (
-                <div className="p-6 text-center text-xs text-[#A0B0BA]">Carregando conversas...</div>
+                <div className="p-6 text-center text-xs text-[#B4C5CE]">Carregando conversas...</div>
               ) : filteredConversations.length === 0 ? (
-                <div className="p-8 text-center text-xs text-[#A0B0BA]">
-                  <div className="w-10 h-10 rounded-full bg-[#101D2D] flex items-center justify-center text-[#A0B0BA] mx-auto mb-2">
+                <div className="p-8 text-center text-xs text-[#B4C5CE]">
+                  <div className="w-10 h-10 rounded-full bg-[#263744] flex items-center justify-center text-[#B4C5CE] mx-auto mb-2">
                     <span className="material-symbols-outlined text-[20px]">chat_bubble_outline</span>
                   </div>
-                  <p className="font-semibold text-[#F5F2EA] mb-1">Fila vazia</p>
-                  <p className="text-[11px] text-[#A0B0BA]">Nenhum atendimento aberto no momento.</p>
+                  <p className="font-semibold text-[#E1E8EC] mb-1">Fila vazia</p>
+                  <p className="text-[11px] text-[#B4C5CE]">Nenhum atendimento aberto no momento.</p>
                 </div>
               ) : (
                 filteredConversations.map((conv) => {
@@ -345,27 +345,27 @@ export default function AtendimentoWhatsApp() {
                       onClick={() => setSelectedConvId(conv.id)}
                       className={`w-full p-3.5 text-left transition-colors flex items-start gap-3 cursor-pointer ${
                         isSelected
-                          ? 'bg-[#17374A] border-l-4 border-[#C9AE69] shadow-xs'
-                          : 'hover:bg-[#17374A]/80'
+                          ? 'bg-[#344956] border-l-4 border-[#527D91] shadow-xs'
+                          : 'hover:bg-[#344956]/80'
                       }`}
                     >
-                      <div className="w-9 h-9 rounded-full bg-[#101D2D] text-[#F5F2EA] font-bold text-xs flex items-center justify-center flex-shrink-0">
+                      <div className="w-9 h-9 rounded-full bg-[#263744] text-[#E1E8EC] font-bold text-xs flex items-center justify-center flex-shrink-0">
                         {conv.contactName.charAt(0)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2 mb-0.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <ConversationStatusIndicator status={conv.visualStatus} />
-                            <span className="text-xs font-bold text-[#F5F2EA] truncate">{conv.contactName}</span>
+                            <span className="text-xs font-bold text-[#E1E8EC] truncate">{conv.contactName}</span>
                           </div>
-                          <span className="text-[10px] text-[#A0B0BA] flex-shrink-0">{formatDateTime(conv.lastMessageAt)}</span>
+                          <span className="text-[10px] text-[#B4C5CE] flex-shrink-0">{formatDateTime(conv.lastMessageAt)}</span>
                         </div>
-                        <p className="text-[11px] text-[#A0B0BA] truncate leading-tight">{conv.lastMessage}</p>
+                        <p className="text-[11px] text-[#B4C5CE] truncate leading-tight">{conv.lastMessage}</p>
                         <div className="flex items-center justify-between mt-2">
-                          <span className="text-[10px] text-[#A0B0BA] truncate">Resp.: {conv.assignedName || 'Não atribuído'}</span>
+                          <span className="text-[10px] text-[#B4C5CE] truncate">Resp.: {conv.assignedName || 'Não atribuído'}</span>
                           {conv.unreadCount > 0 && (
                             <span
-                              className="min-w-4 px-1 h-4 rounded-full bg-[#D14747] text-[#F5F2EA] text-[9px] font-bold flex items-center justify-center"
+                              className="min-w-4 px-1 h-4 rounded-full bg-[#B53A3A] text-white text-[9px] font-bold flex items-center justify-center"
                               title={`${conv.unreadCount} mensagem(ns) não lida(s)`}
                             >
                               {conv.unreadCount}
@@ -383,14 +383,14 @@ export default function AtendimentoWhatsApp() {
 
         {/* Coluna 2: Chat Viewport Principal */}
         {showChat ? (
-          <div className="flex-1 flex flex-col bg-[#101D2D] min-w-0">
+          <div className="flex-1 flex flex-col bg-[#263744] min-w-0">
             {/* Voltar para a fila em telas compactas */}
             {isMobileView && (
-              <div className="lg:hidden px-3 py-2 border-b border-[#2B3D50] bg-[#17374A] flex-shrink-0">
+              <div className="lg:hidden px-3 py-2 border-b border-[#526673] bg-[#344956] flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setSelectedConvId(null)}
-                  className="inline-flex items-center gap-2 text-[#C9AE69] text-xs font-semibold hover:text-[#E0C98F]"
+                  className="inline-flex items-center gap-2 text-[#D0B783] text-xs font-semibold hover:text-[#E1E8EC]"
                 >
                   <span className="material-symbols-outlined text-[16px]">arrow_back</span>
                   <span>Voltar à fila</span>
@@ -399,17 +399,17 @@ export default function AtendimentoWhatsApp() {
             )}
 
             {/* Header do Chat Selecionado */}
-            <div className="min-h-14 px-3 sm:px-4 py-2 bg-[#17374A] border-b border-[#2B3D50] flex items-center justify-between gap-2 flex-shrink-0">
+            <div className="min-h-14 px-3 sm:px-4 py-2 bg-[#344956] border-b border-[#526673] flex items-center justify-between gap-2 flex-shrink-0">
               <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-9 h-9 rounded-full bg-[#17374A] text-[#F5F2EA] font-bold text-sm flex items-center justify-center flex-shrink-0">
+                <div className="w-9 h-9 rounded-full bg-[#263744] text-[#D0B783] font-bold text-sm flex items-center justify-center flex-shrink-0">
                   {selectedConversation?.contactName.charAt(0)}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-[#F5F2EA] truncate">{selectedConversation?.contactName}</h3>
-                  <div className="flex items-center gap-1.5 text-[11px] text-[#A0B0BA] min-w-0">
+                  <h3 className="text-sm font-bold text-[#E1E8EC] truncate">{selectedConversation?.contactName}</h3>
+                  <div className="flex items-center gap-1.5 text-[11px] text-[#B4C5CE] min-w-0">
                     <span className="font-mono truncate">{selectedConversation?.contactPhone}</span>
                     <span className="hidden sm:inline">•</span>
-                    <span className="hidden sm:inline text-[#39AC6B] font-medium whitespace-nowrap">WhatsApp Oficial</span>
+                    <span className="hidden sm:inline text-[#8FE3AC] font-medium whitespace-nowrap">WhatsApp Oficial</span>
                     <span className="hidden sm:inline">•</span>
                     <ConversationStatusIndicator
                       status={selectedConversation?.visualStatus}
@@ -423,11 +423,11 @@ export default function AtendimentoWhatsApp() {
 
               {/* Seletor de Status da Conversa */}
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-xs text-[#A0B0BA] font-medium hidden xl:inline">Status:</span>
+                <span className="text-xs text-[#B4C5CE] font-medium hidden xl:inline">Status:</span>
                 <select
                   value={selectedConversation?.status}
                   onChange={(e) => handleStatusChange(e.target.value as any)}
-                  className="w-[142px] sm:w-[160px] px-2 py-1.5 rounded-lg border border-[#2B3D50] bg-[#17374A] text-[11px] sm:text-xs font-semibold text-[#F5F2EA] outline-none cursor-pointer focus:border-[#C9AE69]"
+                  className="w-[142px] sm:w-[160px] px-2 py-1.5 rounded-lg border border-[#526673] bg-[#2D404D] text-[11px] sm:text-xs font-semibold text-[#E1E8EC] outline-none cursor-pointer focus:border-[#527D91]"
                 >
                   <option value="open">Aguardando</option>
                   <option value="in_progress">Em Atendimento</option>
@@ -441,7 +441,7 @@ export default function AtendimentoWhatsApp() {
               {messages.map((msg) => {
                 if (msg.senderType === 'internal_note') {
                   return (
-                    <div key={msg.id} className="max-w-md mx-auto p-3 rounded-lg bg-[#17374A] border border-dashed border-[#C9AE69] text-xs text-[#C9AE69]">
+                    <div key={msg.id} className="max-w-md mx-auto p-3 rounded-lg bg-[#263744] border border-dashed border-[#D0B783] text-xs text-[#D0B783]">
                       <div className="flex items-center gap-1.5 font-bold mb-1">
                         <span className="material-symbols-outlined text-[14px]">lock</span>
                         <span>Nota Interna • {msg.senderName} ({formatDateTime(msg.createdAt)})</span>
@@ -454,18 +454,18 @@ export default function AtendimentoWhatsApp() {
                 const isAgent = msg.senderType === 'agent';
                 return (
                   <div key={msg.id} className={`flex flex-col ${isAgent ? 'items-end' : 'items-start'}`}>
-                    <div className={`max-w-xs md:max-w-md p-3 rounded-xl shadow-xs text-xs leading-relaxed transition-all ${isAgent ? 'bg-[#39AC6B]/20 text-[#F5F2EA] border border-[#39AC6B]/50 rounded-br-xs' : 'bg-[#17374A] text-[#F5F2EA] border border-[#2B3D50] rounded-bl-xs'}`}>
+                    <div className={`max-w-xs md:max-w-md p-3 rounded-xl shadow-xs text-xs leading-relaxed transition-all ${isAgent ? 'bg-[#527D91]/25 text-[#E1E8EC] border border-[#527D91]/60 rounded-br-xs' : 'bg-[#344956] text-[#E1E8EC] border border-[#526673] rounded-bl-xs'}`}>
                       <p className="whitespace-pre-wrap select-text">{msg.content}</p>
-                      <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] text-[#A0B0BA] select-none">
+                      <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] text-[#B4C5CE] select-none">
                         <span>{formatDateTime(msg.createdAt)}</span>
                         {isAgent && (
                           msg.status === 'failed' ? (
-                            <span className="flex items-center gap-1 text-[#D14747]" title="Falha no envio pelo WhatsApp">
+                            <span className="flex items-center gap-1 text-[#FFA8A8]" title="Falha no envio pelo WhatsApp">
                               <span className="material-symbols-outlined text-[13px]">error</span>
                               <span>Falhou</span>
                             </span>
                           ) : (
-                            <span className={`material-symbols-outlined text-[13px] ${msg.status === 'read' ? 'text-[#39AC6B]' : 'text-[#8696A0]'}`} title={msg.status === 'read' ? 'Lida' : 'Entregue'}>
+                            <span className={`material-symbols-outlined text-[13px] ${msg.status === 'read' ? 'text-[#8FE3AC]' : 'text-[#B4C5CE]'}`} title={msg.status === 'read' ? 'Lida' : 'Entregue'}>
                               {msg.status === 'read' ? 'done_all' : 'done'}
                             </span>
                           )
@@ -479,28 +479,28 @@ export default function AtendimentoWhatsApp() {
             </div>
 
             {/* Barra de Ações e Mensagens Prontas */}
-            <div className="px-4 py-2 bg-[#17374A] border-t border-[#2B3D50] flex items-center justify-between text-xs text-[#A0B0BA]">
+            <div className="px-4 py-2 bg-[#344956] border-t border-[#526673] flex items-center justify-between text-xs text-[#B4C5CE]">
               <div className="flex items-center gap-2">
-                <button type="button" onClick={() => setIsInternalNote(!isInternalNote)} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${isInternalNote ? 'bg-[#C9AE69] text-[#F5F2EA]' : 'hover:bg-[#101D2D] text-[#A0B0BA]'}`}>
+                <button type="button" onClick={() => setIsInternalNote(!isInternalNote)} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${isInternalNote ? 'bg-[#527D91] text-white' : 'hover:bg-[#263744] text-[#B4C5CE]'}`}>
                   <span className="material-symbols-outlined text-[14px]">{isInternalNote ? 'lock' : 'lock_open'}</span>
                   <span>Nota Interna</span>
                 </button>
 
                 <div className="relative">
-                  <button type="button" onClick={() => setShowQuickMenu(!showQuickMenu)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded hover:bg-[#101D2D] text-[#A0B0BA] text-xs font-semibold cursor-pointer">
+                  <button type="button" onClick={() => setShowQuickMenu(!showQuickMenu)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded hover:bg-[#263744] text-[#B4C5CE] text-xs font-semibold cursor-pointer">
                     <span className="material-symbols-outlined text-[14px]">quickreply</span>
                     <span>Respostas Rápidas ({quickReplies.length})</span>
                   </button>
 
                   {/* Menu Popover de Respostas Rápidas */}
                   {showQuickMenu && (
-                    <div className="absolute bottom-full left-0 mb-2 w-72 bg-[#17374A] rounded-lg shadow-xl border border-[#2B3D50] py-1 z-20">
-                      <div className="px-3 py-1.5 text-[10px] font-bold uppercase text-[#A0B0BA] border-b border-[#2B3D50]">Inserir Resposta Pronta</div>
-                      <div className="max-h-48 overflow-y-auto divide-y divide-[#2B3D50]">
+                    <div className="absolute bottom-full left-0 mb-2 w-72 bg-[#344956] rounded-lg shadow-xl border border-[#526673] py-1 z-20">
+                      <div className="px-3 py-1.5 text-[10px] font-bold uppercase text-[#B4C5CE] border-b border-[#526673]">Inserir Resposta Pronta</div>
+                      <div className="max-h-48 overflow-y-auto divide-y divide-[#526673]">
                         {quickReplies.map((qr) => (
-                          <button key={qr.id} type="button" onClick={() => { setNewMessage((prev) => `${prev} ${qr.content}`.trim()); setShowQuickMenu(false); }} className="w-full text-left p-2 hover:bg-[#101D2D] text-xs transition-colors cursor-pointer">
-                            <span className="font-bold text-[#C9AE69] block">{qr.shortcut}</span>
-                            <span className="text-[#F5F2EA] truncate block">{qr.title}</span>
+                          <button key={qr.id} type="button" onClick={() => { setNewMessage((prev) => `${prev} ${qr.content}`.trim()); setShowQuickMenu(false); }} className="w-full text-left p-2 hover:bg-[#263744] text-xs transition-colors cursor-pointer">
+                            <span className="font-bold text-[#D0B783] block">{qr.shortcut}</span>
+                            <span className="text-[#E1E8EC] truncate block">{qr.title}</span>
                           </button>
                         ))}
                       </div>
@@ -509,26 +509,26 @@ export default function AtendimentoWhatsApp() {
                 </div>
               </div>
 
-              <span className="hidden sm:inline text-[11px] text-[#A0B0BA]">Pressione <strong>Enter</strong> para enviar</span>
+              <span className="hidden sm:inline text-[11px] text-[#B4C5CE]">Pressione <strong>Enter</strong> para enviar</span>
             </div>
 
             {/* Composer de Envio */}
-            <form onSubmit={handleSendMessage} className="p-3 sm:p-4 bg-[#17374A] border-t border-[#2B3D50] flex items-center gap-2 sm:gap-3">
-              <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isInternalNote ? 'Escreva uma nota interna (visível apenas para sua equipe)...' : 'Digite sua mensagem no WhatsApp...'} className={`flex-1 min-w-0 px-3 sm:px-4 py-2.5 rounded-lg border text-xs outline-none transition-all ${isInternalNote ? 'border-[#C9AE69] bg-[#17374A] text-[#C9AE69] placeholder-[#C9AE69]/60' : 'border-[#2B3D50] bg-[#101D2D] text-[#F5F2EA] focus:border-[#C9AE69] focus:bg-[#17374A]'}`} />
-              <button type="submit" disabled={sending || !newMessage.trim()} className={`px-3 sm:px-4 py-2.5 rounded-lg font-semibold text-xs text-[#F5F2EA] flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${isInternalNote ? 'bg-[#C9AE69]' : 'bg-[#C9AE69] hover:brightness-95'} disabled:opacity-50`}>
+            <form onSubmit={handleSendMessage} className="p-3 sm:p-4 bg-[#344956] border-t border-[#526673] flex items-center gap-2 sm:gap-3">
+              <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isInternalNote ? 'Escreva uma nota interna (visível apenas para sua equipe)...' : 'Digite sua mensagem no WhatsApp...'} className={`flex-1 min-w-0 px-3 sm:px-4 py-2.5 rounded-lg border text-xs outline-none transition-all ${isInternalNote ? 'border-[#D0B783] bg-[#2D404D] text-[#D0B783] placeholder-[#D0B783]/80' : 'border-[#526673] bg-[#2D404D] text-[#E1E8EC] focus:border-[#527D91] focus:bg-[#2D404D]'}`} />
+              <button type="submit" disabled={sending || !newMessage.trim()} className={`px-3 sm:px-4 py-2.5 rounded-lg font-semibold text-xs text-white flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${isInternalNote ? 'bg-[#527D91]' : 'bg-[#527D91] hover:brightness-95'} disabled:opacity-50`}>
                 <span>{isInternalNote ? 'Salvar Nota' : 'Enviar'}</span>
                 <span className="material-symbols-outlined text-[16px]">{isInternalNote ? 'note_add' : 'send'}</span>
               </button>
             </form>
           </div>
         ) : !isMobileView ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-[#A0B0BA] text-xs p-8 bg-[#101D2D]/30">
-            <div className="w-14 h-14 rounded-full bg-[#101D2D] flex items-center justify-center text-[#A0B0BA] mb-3">
+          <div className="flex-1 flex flex-col items-center justify-center text-[#B4C5CE] text-xs p-8 bg-[#263744]/30">
+            <div className="w-14 h-14 rounded-full bg-[#263744] flex items-center justify-center text-[#B4C5CE] mb-3">
               <span className="material-symbols-outlined text-[28px]">chat</span>
             </div>
-            <h3 className="text-sm font-semibold text-[#F5F2EA] mb-1">Central de Atendimento WhatsApp</h3>
-            <p className="text-xs text-[#A0B0BA] max-w-sm text-center mb-4 leading-relaxed">Selecione uma conversa na fila ao lado para começar o atendimento.</p>
-            <Link to="/contatos" className="px-4 py-2 rounded-lg bg-[#C9AE69] text-[#F5F2EA] text-xs font-semibold hover:brightness-95 transition-all shadow-xs inline-flex items-center gap-1.5">
+            <h3 className="text-sm font-semibold text-[#E1E8EC] mb-1">Central de Atendimento WhatsApp</h3>
+            <p className="text-xs text-[#B4C5CE] max-w-sm text-center mb-4 leading-relaxed">Selecione uma conversa na fila ao lado para começar o atendimento.</p>
+            <Link to="/contatos" className="px-4 py-2 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs inline-flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px]">contacts</span>
               <span>Ver Lista de Contatos</span>
             </Link>

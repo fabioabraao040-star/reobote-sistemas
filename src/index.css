@@ -2,14 +2,60 @@
 @config "../tailwind.config.js";
 
 @layer base {
+  :root {
+    color-scheme: dark;
+    --color-petroleum-bg: #263744;
+    --color-petroleum-panel: #344956;
+    --color-petroleum-primary: #527D91;
+    --color-petroleum-gold: #D0B783;
+    --color-petroleum-text: #E1E8EC;
+    --color-petroleum-muted: #B4C5CE;
+    --color-petroleum-border: #526673;
+    --color-petroleum-field: #2D404D;
+    /* Tints semânticos para texto legível sobre superfícies escuras. */
+    --color-petroleum-success-text: #8FE3AC;
+    --color-petroleum-warning-text: #F5C26B;
+    --color-petroleum-error-text: #FFA8A8;
+    --color-petroleum-error-strong: #B53A3A;
+  }
+
   html, body {
     margin: 0;
     padding: 0;
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    color: #F5F2EA;
-    background-color: #101D2D;
+    color: #E1E8EC;
+    background-color: #263744;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+  select,
+  textarea {
+    background-color: var(--color-petroleum-field);
+    color: var(--color-petroleum-text);
+  }
+
+  select option {
+    background-color: var(--color-petroleum-field);
+    color: var(--color-petroleum-text);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-petroleum-muted);
+    opacity: 0.8;
+  }
+
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='range'] {
+    accent-color: var(--color-petroleum-primary);
+  }
+
+  ::selection {
+    background-color: var(--color-petroleum-primary);
+    color: #FFFFFF;
   }
 }
 

@@ -26,17 +26,17 @@ export interface ConversationStatusMeta {
 
 export const CONVERSATION_VISUAL_STATUS_META: Record<ConversationVisualStatus, ConversationStatusMeta> = {
   unread: {
-    color: '#D14747',
+    color: '#FFA8A8',
     label: 'Não lida',
     shortLabel: 'Não lida',
   },
   awaiting_reply: {
-    color: '#EFA339',
+    color: '#F5C26B',
     label: 'Aberta, sem resposta',
     shortLabel: 'Sem resposta',
   },
   replied: {
-    color: '#39AC6B',
+    color: '#8FE3AC',
     label: 'Respondida',
     shortLabel: 'Respondida',
   },

@@ -1,183 +1,117 @@
 import { useNavigate } from 'react-router-dom';
 
-const btnStyle = {
-  background:
-    'linear-gradient(135deg, rgba(201, 174, 105, 0.12) 0%, rgba(13, 34, 50, 0.88) 25%, rgba(7, 20, 36, 0.95) 70%, rgba(201, 174, 105, 0.08) 100%)',
-  backdropFilter: 'blur(16px)',
-  border: '1px solid',
-  borderColor:
-    'rgba(255, 230, 160, 0.5) rgba(201, 174, 105, 0.45) rgba(201, 174, 105, 0.45)',
-  boxShadow:
-    'rgba(0, 0, 0, 0.7) 0px 12px 35px -8px, rgba(255, 240, 190, 0.35) 0px 1px 1px inset, rgba(0, 0, 0, 0.6) 0px -1px 2px inset, rgba(201, 174, 105, 0.18) 0px 0px 18px',
-};
-
 export default function LandingPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="bg-surface min-h-screen relative selection:bg-primary-container selection:text-on-primary-container font-body-md text-on-surface">
-      {/* Radial gradient background */}
-      <div className="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-surface-container-high/20 via-transparent to-transparent" />
+    <div className="relative flex min-h-[100svh] flex-col bg-background font-body-md text-on-surface selection:bg-primary/30 selection:text-on-surface">
+      {/* Ambient background */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(208,183,131,0.10),_transparent_55%)]" />
+        <div className="absolute -top-44 left-1/2 h-[34rem] w-[34rem] -translate-x-1/2 rounded-full bg-primary/10 blur-[140px] sm:h-[42rem] sm:w-[42rem]" />
+        <div className="absolute bottom-0 left-1/2 h-[20rem] w-[42rem] -translate-x-1/2 rounded-full bg-secondary-container/20 blur-[120px]" />
 
-      {/* Header */}
-      <header className="fixed top-0 left-0 w-full z-50 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
-        <div className="h-16 max-w-7xl mx-auto px-4 sm:px-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <img
-              alt="REOBOTE SISTEMAS Logo"
-              className="h-8 w-auto object-contain"
-              src="https://lh3.googleusercontent.com/aida/AEtjO1U7s_STP2A1AY2pPrXnqE3_0NXM4CSlRxJRcdW75h7NsyFbBGYVHvje441laS4i3XGRCc_V-6mADhlmpXZ6mbzhT2bja7kbySTPHMAiBCS5XGwyNd86KVMRuF1R7L3MjEd0fyMdvafkrvGxrYw1TcohSbuOM1ERJHOwH8pEKpZlhHeH-eyDVIrR08WR_Z1885c9l6uJNpW_q9T5-6FNd4yxC2JmC8z6fLfhrVNc_L9sHcQCcIivgvgVm1s"
-            />
-            <span className="font-headline-lg text-headline-lg text-primary tracking-tight font-semibold">
+        {/* Subtle structural grid */}
+        <div
+          className="absolute inset-0 opacity-[0.10]"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(208, 183, 131, 0.35) 1px, transparent 1px), linear-gradient(90deg, rgba(208, 183, 131, 0.35) 1px, transparent 1px)',
+            backgroundSize: '64px 64px',
+            maskImage: 'radial-gradient(ellipse at center, black 15%, transparent 72%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, black 15%, transparent 72%)',
+          }}
+        />
+
+        <div className="absolute inset-0 bg-gradient-to-b from-background/10 via-background/40 to-background" />
+      </div>
+
+      <header className="relative z-20 border-b border-white/5 bg-background/70 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
+          <div className="flex items-center gap-3">
+            <div
+              aria-hidden="true"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#D0B783] text-[#263744] shadow-[0_6px_18px_rgba(208,183,131,0.30)]"
+            >
+              <span className="material-symbols-outlined text-[24px]">headset_mic</span>
+            </div>
+            <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-on-surface sm:text-sm">
               REOBOTE SISTEMAS
             </span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-low shadow-[0_0_12px_rgba(201,174,105,0.08)]">
-              <span className="w-2 h-2 rounded-full bg-primary-container animate-pulse" />
-              <span className="font-mono text-xs text-primary-fixed uppercase tracking-wider">
-                ONLINE • ENCRIPTADO
-              </span>
-            </div>
-            <nav className="flex items-center gap-4" data-active-classes="text-primary font-bold">
-              <a
-                aria-current="page"
-                className="transition-colors text-primary font-bold"
-                data-path="overview"
-                href="#"
-              >
-                Visão Geral
-              </a>
-              <a
-                className="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface transition-colors"
-                data-path="security-telemetry"
-                href="#"
-              >
-                Telemetria
-              </a>
-            </nav>
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-              <span className="material-symbols-outlined text-on-primary text-[18px]">
-                person
-              </span>
-            </div>
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 w-full pt-16 min-h-[calc(100vh-64px)]">
-        <div className="flex flex-col w-full relative overflow-hidden py-10 sm:py-24 px-4 sm:px-6 items-center justify-center min-h-[calc(100vh-64px)]">
-          {/* Decorative gradients */}
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-[600px] h-[600px] sm:w-[850px] sm:h-[850px] bg-primary/10 rounded-full blur-[140px] opacity-40 mix-blend-screen" />
-            <div className="w-[350px] h-[350px] sm:w-[500px] sm:h-[500px] bg-secondary-container/40 rounded-full blur-[90px] opacity-30" />
-          </div>
+      <main className="relative z-10 flex flex-1 items-center justify-center px-5 py-12 sm:px-8 sm:py-16">
+        <section aria-labelledby="hero-title" className="relative w-full max-w-xl">
+          <div
+            aria-hidden="true"
+            className="absolute -inset-px rounded-2xl bg-gradient-to-b from-primary/30 via-white/5 to-transparent opacity-70 blur-[1px]"
+          />
 
-          {/* Grid background */}
-          <div className="absolute inset-0 pointer-events-none opacity-25">
-            <svg className="w-full h-full" height="100%" width="100%" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <pattern height="64" id="grid-pattern" patternUnits="userSpaceOnUse" width="64">
-                  <path className="text-primary-container/20" d="M 64 0 L 0 0 0 64" fill="none" stroke="currentColor" strokeWidth="0.8" />
-                  <circle className="text-primary/40" cx="64" cy="64" fill="currentColor" r="1" />
-                </pattern>
-                <linearGradient id="grid-fade" x1="0%" x2="0%" y1="0%" y2="100%">
-                  <stop offset="0%" stopColor="white" stopOpacity="0.8" />
-                  <stop offset="60%" stopColor="white" stopOpacity="0.3" />
-                  <stop offset="100%" stopColor="white" stopOpacity="0" />
-                </linearGradient>
-                <mask id="fade-mask">
-                  <rect fill="url(#grid-fade)" height="100%" width="100%" />
-                </mask>
-              </defs>
-              <rect fill="url(#grid-pattern)" height="100%" mask="url(#fade-mask)" width="100%" />
-            </svg>
-          </div>
-
-          {/* Hero eagle image */}
-          <div className="absolute inset-0 pointer-events-none flex items-start justify-center overflow-hidden z-0 pt-0 sm:pt-1">
-            <img
-              alt="Reobote Sistemas Águia Dourada Cyberpunk"
-              className="w-full max-w-5xl h-auto object-contain opacity-70 mix-blend-screen pointer-events-none select-none transform scale-105 drop-shadow-[0_0_35px_rgba(201,174,105,0.25)]"
-              src="https://lh3.googleusercontent.com/aida/AEtjO1Wf28i4NqGoFAUE1oB7wu_9mq7JOD8H99wntAIbxEcdra1RWcFJ_l6qdzkmX5XZqZBGZy9M0CNg7KhTj93oacN7glFtI_2XltqM6YJ09GrBQJFZeI8UoDXvmd5n3QL8wdaDGyqo7dKkxbMBNYTC2ve_bdFJtTtGrB51y1_fDuhThclmEW34wFteYg2PL5xtUgvm6kv4SduZhMz4TwxBf-RU3wJYzhzzzIjr7cvllsRRR-jepdD6jNXBtpE"
-              style={{
-                maskImage: 'radial-gradient(ellipse at center 42%, rgba(0,0,0,1) 45%, rgba(0,0,0,0) 80%)',
-                WebkitMaskImage: 'radial-gradient(ellipse at center 42%, rgba(0,0,0,1) 45%, rgba(0,0,0,0) 80%)',
-                transform: 'translateY(-12%)',
-              }}
+          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-surface/70 p-6 shadow-[0_24px_80px_-24px_rgba(0,0,0,0.85)] backdrop-blur-2xl sm:p-10">
+            <div
+              aria-hidden="true"
+              className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-primary/80 to-transparent"
             />
-          </div>
 
-          <div className="relative z-10 w-full max-w-5xl flex flex-col items-center">
-            {/* Header content */}
-            <div className="flex flex-col items-center text-center max-w-2xl mx-auto mb-8 sm:mb-10">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-high/60 backdrop-blur-md shadow-sm mb-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary-container shadow-[0_0_8px_currentColor]" />
-                <span className="font-mono text-xs text-primary uppercase tracking-wider">
-                  Terminal de Acesso Corporativo
+            <div className="flex flex-col items-center text-center">
+              <span className="inline-flex items-center gap-2 rounded-full border border-[#D0B783]/40 bg-[#263744] px-3.5 py-1.5">
+                <span
+                  aria-hidden="true"
+                  className="h-1.5 w-1.5 rounded-full bg-[#D0B783] shadow-[0_0_8px_rgba(208,183,131,0.8)]"
+                />
+                <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#D0B783] sm:text-[11px]">
+                  PLATAFORMA INTELIGENTE
                 </span>
-              </div>
-              <h1 className="font-headline-xl sm:text-[46px] sm:leading-[52px] text-headline-xl uppercase tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary-fixed via-primary to-primary-container drop-shadow-sm mb-2">
+              </span>
+
+              <h1
+                className="mt-6 bg-gradient-to-r from-[#E1E8EC] via-[#E1E8EC] to-[#D0B783] bg-clip-text text-[1.5rem] font-semibold leading-[1.08] tracking-tight text-transparent min-[380px]:text-[1.75rem] sm:text-5xl"
+                id="hero-title"
+              >
                 REOBOTE SISTEMAS
               </h1>
-              <p className="font-body-md text-body-md text-on-surface-variant max-w-lg">
-                Selecione o perfil de acesso para inicializar a sessão segura.
+
+              <p className="mt-3 text-base font-medium text-[#D0B783] sm:text-lg">
+                Plataforma Inteligente
+              </p>
+
+              <p className="mt-4 max-w-sm text-sm leading-relaxed text-on-surface-variant sm:text-base">
+                Acesso seguro à plataforma institucional.
               </p>
             </div>
 
-            {/* Acesso ao sistema */}
-            <div className="w-full max-w-md">
-              <button
-                className="group relative w-full rounded-xl transition-all duration-300 ease-out transform hover:-translate-y-1 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/60 overflow-hidden p-4 sm:p-5 flex items-center justify-between gap-4 z-10"
-                style={btnStyle}
-                onClick={() => navigate("/login")}
-              >
-                <div className="relative z-10 flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-gradient-to-b from-[#17374A] to-[#0d1e2b] flex items-center justify-center border-t border-[#fee096]/50 shadow-inner">
-                    <span className="material-symbols-outlined text-primary text-[24px]">login</span>
-                  </div>
-                  <div className="text-left">
-                    <span className="font-mono text-xs uppercase tracking-widest text-primary-container block">
-                      Acesso Seguro
-                    </span>
-                    <span className="font-headline-md text-[20px] font-semibold text-on-surface group-hover:text-primary transition-colors">
-                      Entrar no Sistema
-                    </span>
-                  </div>
-                </div>
-                <span className="material-symbols-outlined text-primary relative z-10">arrow_forward</span>
-              </button>
-            </div>
+            <div
+              aria-hidden="true"
+              className="my-7 h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent"
+            />
 
-            {/* Security badges */}
-            <div className="mt-6 sm:mt-10 flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-center">
-              <div className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-primary-container text-[18px]">verified_user</span>
-                <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                  Criptografia Ponta a Ponta Ativa
+            <button
+              className="group flex w-full items-center justify-between gap-3 rounded-xl bg-primary px-3 py-3 text-left text-[13px] font-semibold text-on-primary shadow-[0_12px_32px_-12px_rgba(82,125,145,0.45)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary-fixed hover:shadow-[0_16px_36px_-12px_rgba(82,125,145,0.55)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface active:translate-y-0 sm:gap-4 sm:px-5 sm:py-3.5 sm:text-sm"
+              onClick={() => navigate('/login')}
+              type="button"
+            >
+              <span className="flex items-center gap-2.5 sm:gap-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-on-primary/10 sm:h-9 sm:w-9">
+                  <span className="material-symbols-outlined text-[20px]">login</span>
                 </span>
-              </div>
-              <span className="text-outline-variant hidden sm:inline">•</span>
-              <div className="flex items-center gap-1">
-                <span className="material-symbols-outlined text-secondary text-[18px]">lock</span>
-                <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                  Protocolo de Sessão Isolada
-                </span>
-              </div>
-            </div>
+                <span className="whitespace-nowrap">Entrar no Sistema</span>
+              </span>
+              <span className="material-symbols-outlined text-[18px] transition-transform duration-300 group-hover:translate-x-0.5">
+                arrow_forward
+              </span>
+            </button>
           </div>
-        </div>
+        </section>
       </main>
 
-      <footer className="relative z-10 w-full bg-surface-container-lowest/80 backdrop-blur-md shadow-[0_-1px_8px_rgba(0,0,0,0.04)]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex flex-col sm:flex-row items-center justify-between gap-1">
-          <p className="font-body-sm text-body-sm text-on-surface-variant text-center sm:text-left">
-            REOBOTE SISTEMAS © 2025 • Plataforma Corporativa Segura
+      <footer className="relative z-20 border-t border-white/5 bg-background/70 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-center gap-2 px-5 py-5 sm:px-8">
+          <span aria-hidden="true" className="h-1 w-1 rounded-full bg-[#D0B783]/70" />
+          <p className="text-center text-[11px] text-on-surface-variant sm:text-xs">
+            Acesso restrito a usuários autorizados.
           </p>
-          <div className="flex items-center gap-4 font-mono text-xs text-on-surface-variant">
-            <span className="text-primary-container">AES-256</span>
-            <span className="">TLS 1.3</span>
-          </div>
         </div>
       </footer>
     </div>

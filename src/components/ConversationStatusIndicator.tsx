@@ -47,7 +47,7 @@ export function ConversationStatusLegend({ className = '' }: { className?: strin
   const statuses: ConversationVisualStatus[] = ['unread', 'awaiting_reply', 'replied'];
 
   return (
-    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-[#A0B0BA] ${className}`}>
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-[#B4C5CE] ${className}`}>
       {statuses.map((status) => {
         const meta = CONVERSATION_VISUAL_STATUS_META[status];
         return (
