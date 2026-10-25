@@ -2,9 +2,29 @@ import React from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
+type UserRole = 'master_admin' | 'admin' | 'user';
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: 'admin' | 'user';
+  requiredRole?: UserRole;
+}
+
+function hasRequiredRole(userRole: UserRole, requiredRole?: UserRole): boolean {
+  if (!requiredRole) return true;
+  const roleHierarchy: Record<UserRole, number> = {
+    master_admin: 3,
+    admin: 2,
+    user: 1,
+  };
+  return roleHierarchy[userRole] >= roleHierarchy[requiredRole];
+}
+
+function getRoleLabel(role: UserRole): string {
+  switch (role) {
+    case 'master_admin': return 'ADM MASTER';
+    case 'admin': return 'Administrador';
+    case 'user': return 'Usuário / Atendente';
+  }
 }
 
 export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
@@ -28,8 +48,11 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     return <Navigate to="/" replace />;
   }
 
-  // Se a rota exige papel de administrador e o usuário atual for usuário comum
-  if (requiredRole === 'admin' && user.role !== 'admin') {
+  // Verifica se o usuário tem o papel necessário
+  if (requiredRole && !hasRequiredRole(user.role, requiredRole)) {
+    const requiredLabel = getRoleLabel(requiredRole);
+    const currentLabel = getRoleLabel(user.role);
+
     return (
       <div className="min-h-[70vh] flex items-center justify-center p-4">
         <div className="bg-[#344956] p-8 rounded-xl border border-[#D14747]/30 shadow-md max-w-lg w-full text-center">
@@ -40,11 +63,11 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
             Acesso Restrito • 403 Proibido
           </span>
           <h2 className="text-xl font-bold text-[#E1E8EC] mb-2">
-            Privilégios Administrativos Necessários
+            Privilégios de {requiredLabel} Necessários
           </h2>
           <p className="text-sm text-[#B4C5CE] mb-6 leading-relaxed">
-            Seu perfil atual é <strong>{user.name}</strong> ({user.companyName}). 
-            Você não possui autorização para acessar áreas administrativas globais ou alterar parâmetros de outros operadores.
+            Seu perfil atual é <strong>{user.name}</strong> ({currentLabel}). 
+            Você não possui autorização para acessar esta área.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link

@@ -39,24 +39,10 @@ export default function Dashboard() {
   const { user, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState<'hoje' | '7dias' | '30dias'>('hoje');
-  const [showConfigModal, setShowConfigModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [allConversations, setAllConversations] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
-  const [whatsappInfo, setWhatsappInfo] = useState<{
-    connected: boolean;
-    phoneNumber?: string;
-    phoneNumberId?: string;
-    wabaId?: string;
-    verifiedName?: string;
-    webhookUrl?: string;
-    qualityRating?: string;
-    lastChecked?: string;
-    hasAccessToken?: boolean;
-    hasVerifyToken?: boolean;
-  }>({ connected: false });
-
   const [attendantStats, setAttendantStats] = useState<{
     attendantName: string;
     meusAtivos: number;
@@ -75,15 +61,6 @@ export default function Dashboard() {
     whatsappStatus: { connected: false, phoneNumber: null, lastChecked: null },
   });
 
-  const [cfgPhone, setCfgPhone] = useState('');
-  const [cfgPhoneId, setCfgPhoneId] = useState('');
-  const [cfgWabaId, setCfgWabaId] = useState('');
-  const [cfgToken, setCfgToken] = useState('');
-  const [cfgVerifyToken, setCfgVerifyToken] = useState('');
-  const [modalFeedback, setModalFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [savingConfig, setSavingConfig] = useState(false);
-
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -96,49 +73,13 @@ export default function Dashboard() {
     };
   }, [isAdmin, user]);
 
-  // Permite abrir o formulário existente por link direto do menu:
-  // /dashboard?config=1 (somente administrador).
-  useEffect(() => {
-    if (isAdmin && searchParams.get('config') === '1') {
-      setShowConfigModal(true);
-    }
-  }, [isAdmin, searchParams]);
-
-  const closeConfigModal = () => {
-    setShowConfigModal(false);
-    if (searchParams.get('config') === '1') {
-      const next = new URLSearchParams(searchParams);
-      next.delete('config');
-      setSearchParams(next, { replace: true });
-    }
-  };
-
   const loadData = async () => {
     try {
       setLoading(true);
       if (isAdmin) {
-        const [convs, uList, wa] = await Promise.all([api.getConversations(), api.getUsers(), api.getWhatsAppConfig()]);
+        const [convs, uList] = await Promise.all([api.getConversations(), api.getUsers()]);
         setAllConversations(convs);
         setUsersList(uList);
-        setWhatsappInfo({
-          connected: wa.isVerified,
-          phoneNumber: wa.phoneNumber,
-          phoneNumberId: wa.phoneNumberId,
-          wabaId: wa.wabaId,
-          verifiedName: wa.verifiedName,
-          webhookUrl: wa.webhookUrl,
-          qualityRating: wa.qualityRating,
-          lastChecked: wa.lastChecked,
-          hasAccessToken: Boolean(wa.hasAccessToken),
-          hasVerifyToken: Boolean(wa.hasVerifyToken),
-        });
-        setCfgPhone(wa.phoneNumber || '');
-        setCfgPhoneId(wa.phoneNumberId || '');
-        setCfgWabaId(wa.wabaId || '');
-        // Segredos nunca são recarregados para a tela: os campos ficam vazios
-        // e só são enviados quando o administrador digitar um novo valor.
-        setCfgToken('');
-        setCfgVerifyToken('');
       } else {
         const stats = await api.getAttendantStats();
         setAttendantStats(stats);
@@ -150,48 +91,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleSaveWhatsAppConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setModalFeedback(null);
-    setSavingConfig(true);
-    try {
-      const res = await api.saveWhatsAppConfig({
-        phoneNumber: cfgPhone,
-        phoneNumberId: cfgPhoneId,
-        wabaId: cfgWabaId,
-        accessToken: cfgToken.trim() ? cfgToken.trim() : undefined,
-        verifyToken: cfgVerifyToken.trim() ? cfgVerifyToken.trim() : undefined,
-      });
-      setModalFeedback({ type: 'success', message: res.message || 'Configurações salvas no servidor.' });
-      // Limpa os segredos do formulário imediatamente após salvar.
-      setCfgToken('');
-      setCfgVerifyToken('');
-      loadData();
-    } catch (err: any) {
-      setModalFeedback({ type: 'error', message: err.message || 'Erro ao salvar configuração do WhatsApp.' });
-    } finally {
-      setSavingConfig(false);
-    }
-  };
-
-  const handleTestMetaConnection = async () => {
-    setModalFeedback(null);
-    setTestingConnection(true);
-    try {
-      const res = await api.verifyWhatsAppConnection();
-      setModalFeedback({
-        type: 'success',
-        message: `Conexão oficial validada com a Meta! Conta: ${res.verifiedName || 'Ativa'}. Qualidade: ${res.qualityRating || 'Verde'}.`,
-      });
-      loadData();
-    } catch (err: any) {
-      setModalFeedback({ type: 'error', message: err.message || 'Falha na validação com a Meta. Verifique as credenciais no formulário.' });
-      loadData();
-    } finally {
-      setTestingConnection(false);
-    }
-  };
-
   const openCount = allConversations.filter((c) => c.status === 'open').length;
   const inProgressCount = allConversations.filter((c) => c.status === 'in_progress').length;
   const closedCount = allConversations.filter((c) => c.status === 'closed').length;
@@ -200,8 +99,8 @@ export default function Dashboard() {
 
   const badgeClassT = isAdmin ? 'bg-[#EFA339]/10 text-[#F5C26B] border border-[#EFA339]/30' : 'bg-[#263744] text-[#D0B783] border border-[#D0B783]/30';
   const badgeLabelT = isAdmin ? 'Painel Administrativo' : 'Painel do Atendente';
-  const pageTitleT = isAdmin ? 'Monitoramento Geral e Indicadores Oficiais' : `Central de Atendimento — ${user?.name}`;
-  const pageSubtitleT = isAdmin ? 'Visão consolidada de todas as filas, conexões oficiais Meta WhatsApp e operadores da empresa.' : 'Acompanhe seus atendimentos atribuídos e produtividade em tempo real.';
+  const pageTitleT = isAdmin ? 'Monitoramento Geral e Indicadores' : `Central de Atendimento — ${user?.name}`;
+  const pageSubtitleT = isAdmin ? 'Visão consolidada de todas as filas, operadores e métricas da empresa.' : 'Acompanhe seus atendimentos atribuídos e produtividade em tempo real.';
 
   const btnHojeClass = 'px-2 py-1.5 rounded-md text-xs font-semibold transition-all ' + (period === 'hoje' ? 'bg-[#527D91] text-white shadow-xs' : 'text-[#B4C5CE] hover:text-[#E1E8EC]');
   const btn7diasClass = 'px-2 py-1.5 rounded-md text-xs font-semibold transition-all ' + (period === '7dias' ? 'bg-[#527D91] text-white shadow-xs' : 'text-[#B4C5CE] hover:text-[#E1E8EC]');
@@ -257,16 +156,45 @@ export default function Dashboard() {
               <div className="bg-[#344956] p-4 rounded-xl border border-[#526673] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.18)]">
                 <div className="p-4 border-b border-[#526673] flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[#E1E8EC] text-[20px]">settings</span>
-                    <h2 className="font-headline-md text-base font-semibold text-[#E1E8EC]">Configurações do WhatsApp</h2>
+                    <span className="material-symbols-outlined text-[#E1E8EC] text-[20px]">monitoring</span>
+                    <h2 className="font-headline-md text-base font-semibold text-[#E1E8EC]">Monitoramento Geral de Atendimentos</h2>
                   </div>
                 </div>
                 <div className="p-4 text-center">
-                  <p className="text-sm text-[#B4C5CE] mb-4">Configure as credenciais oficiais da Meta WhatsApp Business Cloud API para enviar e receber mensagens em tempo real.</p>
-                  <button type="button" onClick={() => setShowConfigModal(true)} className="w-full py-2.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer">
-                    <span className="material-symbols-outlined text-[16px]">settings</span>
-                    <span>Configurar Conexão WhatsApp</span>
-                  </button>
+                  <p className="text-sm text-[#B4C5CE] mb-4">Acesse a área de atendimento para visualizar e gerenciar todas as conversas da empresa.</p>
+                  <Link to="/atendimento" className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs">
+                    <span className="material-symbols-outlined text-[16px]">chat_bubble_outline</span>
+                    <span>Ir para Atendimento WhatsApp</span>
+                  </Link>
+                </div>
+              </div>
+              <div className="bg-[#344956] p-4 rounded-xl border border-[#526673] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.18)]">
+                <div className="p-4 border-b border-[#526673] flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[#E1E8EC] text-[20px]">settings</span>
+                    <h2 className="font-headline-md text-base font-semibold text-[#E1E8EC]">Gestão Administrativa</h2>
+                  </div>
+                </div>
+                <div className="p-4 space-y-2">
+                  <p className="text-sm text-[#B4C5CE] mb-4">Gerencie usuários, contatos, automações e mensagens prontas da sua unidade.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Link to="/atendentes" className="p-3 rounded-lg border border-[#526673] hover:border-[#527D91] hover:bg-[#263744] transition-all text-left flex flex-col gap-1 group">
+                      <span className="material-symbols-outlined text-[#D0B783] text-[20px]">manage_accounts</span>
+                      <span className="text-xs font-semibold text-[#E1E8EC] group-hover:text-[#D0B783]">Atendentes</span>
+                    </Link>
+                    <Link to="/contatos" className="p-3 rounded-lg border border-[#526673] hover:border-[#527D91] hover:bg-[#263744] transition-all text-left flex flex-col gap-1 group">
+                      <span className="material-symbols-outlined text-[#D0B783] text-[20px]">contacts</span>
+                      <span className="text-xs font-semibold text-[#E1E8EC] group-hover:text-[#D0B783]">Contatos</span>
+                    </Link>
+                    <Link to="/automacoes" className="p-3 rounded-lg border border-[#526673] hover:border-[#527D91] hover:bg-[#263744] transition-all text-left flex flex-col gap-1 group">
+                      <span className="material-symbols-outlined text-[#D0B783] text-[20px]">smart_toy</span>
+                      <span className="text-xs font-semibold text-[#E1E8EC] group-hover:text-[#D0B783]">Automações</span>
+                    </Link>
+                    <Link to="/mensagens" className="p-3 rounded-lg border border-[#526673] hover:border-[#527D91] hover:bg-[#263744] transition-all text-left flex flex-col gap-1 group">
+                      <span className="material-symbols-outlined text-[#D0B783] text-[20px]">quickreply</span>
+                      <span className="text-xs font-semibold text-[#E1E8EC] group-hover:text-[#D0B783]">Mensagens Prontas</span>
+                    </Link>
+                  </div>
                 </div>
               </div>
             </div>
@@ -356,85 +284,6 @@ export default function Dashboard() {
             </div>
           </div>
         </>
-      )}
-      {showConfigModal && isAdmin && (
-        <div className="fixed inset-0 z-50 bg-[#263744]/75 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-[#344956] rounded-xl shadow-2xl border border-[#526673] max-w-lg w-full p-6 animate-fadeIn max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-[#526673] mb-4">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#D0B783]">settings</span>
-                <h3 className="font-headline-md text-base font-bold text-[#E1E8EC]">Configuração Oficial do WhatsApp (Meta Cloud API)</h3>
-              </div>
-              <button type="button" onClick={closeConfigModal} className="text-[#B4C5CE] hover:text-[#E1E8EC] p-1 cursor-pointer" aria-label="Fechar modal">
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
-            {modalFeedback && (
-              <div className={modalFeedback.type === 'success' ? 'p-3 rounded-lg mb-4 text-xs font-medium bg-[#39AC6B]/10 border border-[#39AC6B]/30 text-[#8FE3AC]' : 'p-3 rounded-lg mb-4 text-xs font-medium bg-[#D14747]/10 border border-[#D14747]/30 text-[#FFA8A8]'}>
-                {modalFeedback.message}
-              </div>
-            )}
-            <form onSubmit={handleSaveWhatsAppConfig} className="space-y-3.5 text-xs text-left">
-              <div>
-                <label className="font-semibold text-[#E1E8EC] block mb-1">Número Oficial da Empresa no WhatsApp *</label>
-                <input type="text" required value={cfgPhone} onChange={(e) => setCfgPhone(e.target.value)} placeholder="+55 (11) 98000-0199" className="w-full px-3 py-2 rounded border border-[#526673] text-[#E1E8EC] outline-none focus:border-[#527D91]" />
-              </div>
-              <div>
-                <label className="font-semibold text-[#E1E8EC] block mb-1">Phone Number ID (Meta Graph API) *</label>
-                <input type="text" required value={cfgPhoneId} onChange={(e) => setCfgPhoneId(e.target.value)} placeholder="Ex.: 102938475610293" className="w-full px-3 py-2 rounded border border-[#526673] text-[#E1E8EC] font-mono text-xs outline-none focus:border-[#527D91]" />
-              </div>
-              <div>
-                <label className="font-semibold text-[#E1E8EC] block mb-1">WhatsApp Business Account ID (WABA ID) *</label>
-                <input type="text" required value={cfgWabaId} onChange={(e) => setCfgWabaId(e.target.value)} placeholder="Ex.: 109283912093847" className="w-full px-3 py-2 rounded border border-[#526673] text-[#E1E8EC] font-mono text-xs outline-none focus:border-[#527D91]" />
-              </div>
-              <div>
-                <label className="font-semibold text-[#E1E8EC] block mb-1">Token de Acesso do Desenvolvedor Meta (System User Token)</label>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={cfgToken}
-                  onChange={(e) => setCfgToken(e.target.value)}
-                  placeholder={whatsappInfo.hasAccessToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado — cole aqui o token da Meta'}
-                  className="w-full px-3 py-2 rounded border border-[#526673] text-[#E1E8EC] font-mono text-xs outline-none focus:border-[#527D91]"
-                />
-                <span className={`text-[10px] mt-0.5 block ${whatsappInfo.hasAccessToken ? 'text-[#8FE3AC]' : 'text-[#B4C5CE]'}`}>
-                  {whatsappInfo.hasAccessToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado'}
-                  {' · '}Segredo armazenado exclusivamente no servidor, nunca exibido no navegador.
-                </span>
-              </div>
-              <div>
-                <label className="font-semibold text-[#E1E8EC] block mb-1">Token de Verificação do Webhook (Verify Token)</label>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={cfgVerifyToken}
-                  onChange={(e) => setCfgVerifyToken(e.target.value)}
-                  placeholder={whatsappInfo.hasVerifyToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado — token definido no painel da Meta'}
-                  className="w-full px-3 py-2 rounded border border-[#526673] text-[#E1E8EC] font-mono text-xs outline-none focus:border-[#527D91]"
-                />
-                <span className={`text-[10px] mt-0.5 block ${whatsappInfo.hasVerifyToken ? 'text-[#8FE3AC]' : 'text-[#B4C5CE]'}`}>
-                  {whatsappInfo.hasVerifyToken ? 'Já configurado — deixe vazio para manter' : 'Não configurado'}
-                </span>
-              </div>
-              {whatsappInfo.webhookUrl && (
-                <div className="p-3 bg-[#263744] border border-[#526673] rounded-lg">
-                  <span className="text-[10px] font-bold uppercase text-[#B4C5CE] block mb-1">URL Oficial do Webhook (Cole no Painel Meta Developer):</span>
-                  <code className="text-[11px] font-mono text-[#E1E8EC] break-all select-all block">{whatsappInfo.webhookUrl}</code>
-                </div>
-              )}
-              <div className="pt-3 border-t border-[#526673] flex flex-col sm:flex-row items-center justify-between gap-3">
-                <button type="button" onClick={handleTestMetaConnection} disabled={testingConnection} className="w-full sm:w-auto px-3.5 py-2 rounded-lg bg-[#527D91] text-white font-semibold hover:brightness-95 transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50">
-                  <span className="material-symbols-outlined text-[16px]">verified</span>
-                  <span>{testingConnection ? 'Validando na Meta...' : 'Testar Conexão Oficial'}</span>
-                </button>
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                  <button type="button" onClick={closeConfigModal} className="px-4 py-2 rounded-lg border border-[#526673] text-[#E1E8EC] font-semibold hover:bg-[#263744] cursor-pointer">Fechar</button>
-                  <button type="submit" disabled={savingConfig} className="px-4 py-2 rounded-lg bg-[#527D91] text-white font-semibold hover:brightness-95 transition-all cursor-pointer disabled:opacity-50">{savingConfig ? 'Salvando...' : 'Salvar Configurações'}</button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
       )}
     </div>
   );

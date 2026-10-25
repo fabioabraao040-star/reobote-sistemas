@@ -117,7 +117,7 @@ interface User {
   company_id: string;
   email: string;
   name: string;
-  role: 'admin' | 'user';
+  role: 'master_admin' | 'admin' | 'user';
   status: 'online' | 'busy' | 'offline';
   created_at?: string;
   updated_at?: string;
@@ -202,7 +202,7 @@ interface WhatsAppConfig {
 // ============================================================================
 
 interface AuthenticatedRequest extends Request {
-  authRole?: 'admin' | 'user';
+  authRole?: 'master_admin' | 'admin' | 'user';
   authCompanyId?: string;
   authUserId?: string;
   authUserName?: string;
@@ -239,7 +239,7 @@ const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: Ne
       return res.status(401).json({ error: 'Usuário não encontrado no sistema.' });
     }
 
-    req.authRole = dbUser.role as 'admin' | 'user';
+    req.authRole = dbUser.role as 'master_admin' | 'admin' | 'user';
     req.authCompanyId = dbUser.company_id;
     req.authUserId = dbUser.id;
     req.authUserName = dbUser.name;
@@ -251,9 +251,19 @@ const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: Ne
 };
 
 const adminOnlyMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  if (req.authRole !== 'admin') {
+  // admin e master_admin têm acesso administrativo
+  if (req.authRole !== 'admin' && req.authRole !== 'master_admin') {
     return res.status(403).json({
       error: 'Acesso Proibido: Esta operação exige privilégios de Administrador.',
+    });
+  }
+  next();
+};
+
+const masterAdminOnlyMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (req.authRole !== 'master_admin') {
+    return res.status(403).json({
+      error: 'Acesso Proibido: Esta operação é exclusiva do ADM MASTER.',
     });
   }
   next();
@@ -264,7 +274,7 @@ const adminOnlyMiddleware = (req: AuthenticatedRequest, res: Response, next: Nex
 // ============================================================================
 
 // 1. WhatsApp Official Meta API Configuration (Admin Only)
-app.get('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req, res) => {
+app.get('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
@@ -295,7 +305,7 @@ app.get('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req,
   });
 });
 
-app.post('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req, res) => {
+app.post('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
@@ -372,7 +382,7 @@ app.post('/api/whatsapp/config', authMiddleware, adminOnlyMiddleware, async (req
 });
 
 // Teste Real de Conexão com Meta Cloud Platform (Chamada de saúde na Graph API)
-app.post('/api/whatsapp/verify-connection', authMiddleware, adminOnlyMiddleware, async (req, res) => {
+app.post('/api/whatsapp/verify-connection', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }

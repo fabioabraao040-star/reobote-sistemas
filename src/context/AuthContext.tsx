@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '../services/api';
 
-export type UserRole = 'admin' | 'user';
+export type UserRole = 'master_admin' | 'admin' | 'user';
 
 export interface UserProfile {
   id: string;
@@ -26,6 +26,7 @@ export interface UserProfile {
 interface AuthContextType {
   user: UserProfile | null;
   isAdmin: boolean;
+  isMasterAdmin: boolean;
   isUser: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (data: { name: string; email: string; password: string; companyId?: string }) => Promise<void>;
@@ -72,14 +73,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .slice(0, 2)
         .map((w: string) => w[0].toUpperCase())
         .join('') || 'U',
-      companyName: data.user.role === 'admin' ? 'Administrador — Gestão Global' : 'Unidade Local',
+      companyName: data.user.role === 'master_admin'
+        ? 'ADM MASTER — Configuração Global'
+        : data.user.role === 'admin'
+          ? 'Administrador — Gestão Global'
+          : 'Unidade Local',
       status: data.user.status,
       token: data.token,
       permissions: {
-        canManageAllUsers: data.user.role === 'admin',
-        canConfigureGlobalWhatsApp: data.user.role === 'admin',
-        canViewAllCompanies: data.user.role === 'admin',
-        canManageAutomations: data.user.role === 'admin',
+        canManageAllUsers: data.user.role === 'admin' || data.user.role === 'master_admin',
+        canConfigureGlobalWhatsApp: data.user.role === 'master_admin',
+        canViewAllCompanies: data.user.role === 'admin' || data.user.role === 'master_admin',
+        canManageAutomations: data.user.role === 'admin' || data.user.role === 'master_admin',
         canSendMessages: true,
         canManageCompanyContacts: true,
       },
@@ -115,11 +120,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'master_admin';
+  const isMasterAdmin = user?.role === 'master_admin';
   const isUser = user?.role === 'user';
 
   return (
-    <AuthContext.Provider value={{ user, isAdmin, isUser, login, register, resetPassword, logout, loading }}>
+    <AuthContext.Provider value={{ user, isAdmin, isMasterAdmin, isUser, login, register, resetPassword, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

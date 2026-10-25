@@ -1,9 +1,33 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+
+type LoginRole = 'master_admin' | 'admin' | 'user';
+
+const roleLabels: Record<LoginRole, string> = {
+  master_admin: 'ADM MASTER',
+  admin: 'ADM',
+  user: 'USUÁRIO / ATENDENTE',
+};
+
+const roleColors: Record<LoginRole, string> = {
+  master_admin: '#D0B783',
+  admin: '#527D91',
+  user: '#39AC6B',
+};
+
+// Helper para ajustar brilho da cor (positivo = mais claro, negativo = mais escuro)
+function adjustColor(hex: string, amount: number): string {
+  const num = parseInt(hex.replace('#', ''), 16);
+  const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amount));
+  const b = Math.max(0, Math.min(255, (num & 0x0000FF) + amount));
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useAuth();
 
   const [email, setEmail] = useState('');
@@ -12,6 +36,14 @@ export default function Login() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<LoginRole>('user');
+
+  useEffect(() => {
+    const roleParam = searchParams.get('role');
+    if (roleParam && ['master_admin', 'admin', 'user'].includes(roleParam)) {
+      setSelectedRole(roleParam as LoginRole);
+    }
+  }, [searchParams]);
 
   const validateEmail = (val: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
@@ -48,7 +80,9 @@ export default function Login() {
         const raw = sessionStorage.getItem('reobote_user');
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (parsed.role === 'admin') {
+          if (parsed.role === 'master_admin') {
+            navigate('/master-admin');
+          } else if (parsed.role === 'admin') {
             navigate('/dashboard');
           } else {
             navigate('/atendimento');
@@ -90,6 +124,22 @@ export default function Login() {
               SISTEMAS
             </span>
           </div>
+        </div>
+
+        {/* Badge do Perfil Selecionado */}
+        <div className="w-full mb-6">
+          <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+            style={{
+              backgroundColor: `${roleColors[selectedRole]}15`,
+              border: `1px solid ${roleColors[selectedRole]}66`,
+              color: roleColors[selectedRole],
+            }}
+          >
+            <span className="relative flex h-4 w-4 items-center justify-center" style={{ backgroundColor: roleColors[selectedRole] }}>
+              <span className="absolute h-1.5 w-1.5 rounded-full" style={{ backgroundColor: roleColors[selectedRole], boxShadow: `0 0 6px ${roleColors[selectedRole]}` }} />
+            </span>
+            {roleLabels[selectedRole]}
+          </span>
         </div>
 
         {/* Título e Subtítulo */}
@@ -213,20 +263,20 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Botão de Envio (Entrar) — Neon Espelhado Premium */}
+          {/* Botão de Envio (Entrar) — Neon Espelhado Premium com cor do perfil */}
           <button
             type="submit"
             disabled={submitting}
             className="w-full mt-1 py-3 rounded-xl font-label-md text-label-md text-white font-semibold transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
             style={{
-              // Base metálica espelhada com gradiente neon (#527D91)
-              background: 'linear-gradient(135deg, #527D91 0%, #3A5F73 25%, #527D91 50%, #6BA3C8 75%, #527D91 100%)',
+              // Base metálica espelhada com gradiente neon na cor do perfil
+              background: `linear-gradient(135deg, ${roleColors[selectedRole]} 0%, ${adjustColor(roleColors[selectedRole], -20)} 25%, ${roleColors[selectedRole]} 50%, ${adjustColor(roleColors[selectedRole], 20)} 75%, ${roleColors[selectedRole]} 100%)`,
               backgroundSize: '200% 200%',
               backgroundPosition: submitting ? '50% 50%' : '0% 50%',
               // Brilho metálico nas bordas + reflexo neon
               boxShadow: submitting
-                ? '0 0 0 1px rgba(82,125,145,0.5), 0 2px 8px -4px rgba(82,125,145,0.4), inset 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)'
-                : '0 0 0 1px rgba(82,125,145,0.6), 0 4px 16px -4px rgba(82,125,145,0.5), 0 0 20px -8px rgba(82,125,145,0.7), inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.1)',
+                ? `0 0 0 1px ${roleColors[selectedRole]}80, 0 2px 8px -4px ${roleColors[selectedRole]}66, inset 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)`
+                : `0 0 0 1px ${roleColors[selectedRole]}99, 0 4px 16px -4px ${roleColors[selectedRole]}80, 0 0 20px -8px ${roleColors[selectedRole]}99, inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.1)`,
               // Animação sutil do gradiente
               animation: submitting ? 'none' : 'neon-shimmer 3s ease-in-out infinite',
             }}
@@ -234,7 +284,7 @@ export default function Login() {
               if (!submitting) {
                 const btn = e.currentTarget;
                 btn.style.backgroundPosition = '100% 50%';
-                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.8), 0 6px 24px -4px rgba(82,125,145,0.6), 0 0 32px -6px rgba(82,125,145,0.9), inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(0,0,0,0.1)';
+                btn.style.boxShadow = `0 0 0 1px ${roleColors[selectedRole]}CC, 0 6px 24px -4px ${roleColors[selectedRole]}99, 0 0 32px -6px ${roleColors[selectedRole]}CC, inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(0,0,0,0.1)`;
                 btn.style.transform = 'translateY(-1px)';
               }
             }}
@@ -242,21 +292,21 @@ export default function Login() {
               if (!submitting) {
                 const btn = e.currentTarget;
                 btn.style.backgroundPosition = '0% 50%';
-                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.6), 0 4px 16px -4px rgba(82,125,145,0.5), 0 0 20px -8px rgba(82,125,145,0.7), inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.1)';
+                btn.style.boxShadow = `0 0 0 1px ${roleColors[selectedRole]}99, 0 4px 16px -4px ${roleColors[selectedRole]}80, 0 0 20px -8px ${roleColors[selectedRole]}99, inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.1)`;
                 btn.style.transform = 'translateY(0)';
               }
             }}
             onMouseDown={(e) => {
               if (!submitting) {
                 const btn = e.currentTarget;
-                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.5), 0 2px 8px -4px rgba(82,125,145,0.4), inset 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                btn.style.boxShadow = `0 0 0 1px ${roleColors[selectedRole]}80, 0 2px 8px -4px ${roleColors[selectedRole]}66, inset 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)`;
                 btn.style.transform = 'translateY(0) scale(0.99)';
               }
             }}
             onMouseUp={(e) => {
               if (!submitting) {
                 const btn = e.currentTarget;
-                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.8), 0 6px 24px -4px rgba(82,125,145,0.6), 0 0 32px -6px rgba(82,125,145,0.9), inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(0,0,0,0.1)';
+                btn.style.boxShadow = `0 0 0 1px ${roleColors[selectedRole]}CC, 0 6px 24px -4px ${roleColors[selectedRole]}99, 0 0 32px -6px ${roleColors[selectedRole]}CC, inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(0,0,0,0.1)`;
                 btn.style.transform = 'translateY(-1px)';
               }
             }}
