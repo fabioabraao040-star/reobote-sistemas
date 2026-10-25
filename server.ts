@@ -2410,11 +2410,37 @@ app.use('/api', (_req, res) => {
 // FUNCTION_INVOCATION_FAILED em vez de responder 500.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('[api] erro não tratado:', err);
   if (res.headersSent) {
     return;
   }
-  res.status(500).json({ error: 'Erro interno do servidor.' });
+
+  // Erros do body-parser (JSON inválido, corpo grande, tipo não suportado)
+  // carregam status 4xx. Preservar esse status evita devolver HTTP 500 para
+  // um erro do cliente — era o que acontecia em /api/auth/login com JSON
+  // malformado ou corpo "null".
+  const errorWithStatus = err as { status?: unknown; statusCode?: unknown; type?: unknown } | null;
+  const rawStatus = errorWithStatus?.status ?? errorWithStatus?.statusCode;
+  const status =
+    typeof rawStatus === 'number' && rawStatus >= 400 && rawStatus < 500 ? rawStatus : 500;
+
+  if (status >= 500) {
+    console.error('[api] erro não tratado:', err);
+  } else {
+    // Não registrar o objeto do body-parser: ele carrega o corpo bruto da
+    // requisição, que pode conter senha em JSON malformado.
+    console.warn('[api] requisição inválida:', errorWithStatus?.type || status);
+  }
+
+  let message = 'Requisição inválida.';
+  if (status >= 500) {
+    message = 'Erro interno do servidor.';
+  } else if (status === 413) {
+    message = 'Requisição muito grande.';
+  } else if (status === 415) {
+    message = 'Tipo de conteúdo não suportado.';
+  }
+
+  res.status(status).json({ error: message });
 });
 
 // Exportado para uso local (dev-server.ts) e como função serverless na Vercel.
