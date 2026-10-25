@@ -1,8 +1,7 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute.tsx';
 import Layout from './components/Layout.tsx';
-import LandingPage from './components/LandingPage.tsx';
 import Login from './components/Login.tsx';
 import Cadastro from './pages/Cadastro.tsx';
 import ForgotPassword from './pages/ForgotPassword.tsx';
@@ -19,8 +18,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* Tela inicial: Landing Page com seleção de perfil */}
-          <Route path="/" element={<LandingPage />} />
+          {/* Tela inicial: Login direto (tela única de autenticação) */}
+          <Route path="/" element={<Login />} />
 
           {/* Telas públicas (não autenticadas) */}
           <Route path="/login" element={<Login />} />
@@ -33,7 +32,7 @@ export default function App() {
             <Route
               path="/dashboard"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="admin">
                   <Dashboard />
                 </ProtectedRoute>
               }
@@ -42,7 +41,7 @@ export default function App() {
             <Route
               path="/atendimento"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="user">
                   <AtendimentoWhatsApp />
                 </ProtectedRoute>
               }
@@ -51,7 +50,7 @@ export default function App() {
             <Route
               path="/contatos"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="admin">
                   <Contatos />
                 </ProtectedRoute>
               }
@@ -60,7 +59,7 @@ export default function App() {
             <Route
               path="/atendentes"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="admin">
                   <Atendentes />
                 </ProtectedRoute>
               }
@@ -69,7 +68,7 @@ export default function App() {
             <Route
               path="/automacoes"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="admin">
                   <Automacoes />
                 </ProtectedRoute>
               }
@@ -78,12 +77,15 @@ export default function App() {
             <Route
               path="/mensagens"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="admin">
                   <MensagensProntas />
                 </ProtectedRoute>
               }
             />
           </Route>
+
+          {/* Fallback: redireciona rotas não encontradas para login */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

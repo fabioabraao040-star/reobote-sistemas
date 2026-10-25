@@ -76,3 +76,24 @@
   user-select: none;
   vertical-align: middle;
 }
+
+/* Animação neon shimmer para botão premium */
+@keyframes neon-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Garante que a animação funcione no botão */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes neon-shimmer {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+}

@@ -43,7 +43,22 @@ export default function Login() {
 
     try {
       await login(trimmedEmail, password);
-      navigate('/dashboard');
+      // Redireciona baseado no perfil salvo na sessão
+      try {
+        const raw = sessionStorage.getItem('reobote_user');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.role === 'admin') {
+            navigate('/dashboard');
+          } else {
+            navigate('/atendimento');
+          }
+        } else {
+          navigate('/dashboard');
+        }
+      } catch {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'Erro ao fazer login. Verifique suas credenciais.');
     } finally {
@@ -72,7 +87,7 @@ export default function Login() {
               REOBOTE
             </span>
             <span className="font-label-sm text-[10px] tracking-widest uppercase font-semibold text-[#E1E8EC]/75 leading-tight">
-              Sistema de Atendimento
+              SISTEMAS
             </span>
           </div>
         </div>
@@ -80,10 +95,10 @@ export default function Login() {
         {/* Título e Subtítulo */}
         <div className="w-full text-center mb-6">
           <h1 className="font-headline-lg text-headline-lg font-bold mb-1 text-[#E1E8EC] tracking-tight">
-            Acesso ao Sistema
+            Plataforma Inteligente
           </h1>
           <p className="font-body-md text-body-md text-[#E1E8EC]/80 leading-snug">
-            Insira seus dados para acessar a central de atendimento.
+            Acesso seguro à plataforma institucional.
           </p>
         </div>
 
@@ -198,23 +213,78 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Botão de Envio (Entrar) */}
+          {/* Botão de Envio (Entrar) — Neon Espelhado Premium */}
           <button
             type="submit"
             disabled={submitting}
-            className="w-full mt-1 py-3 rounded-xl font-label-md text-label-md text-white font-semibold transition-all duration-200 shadow-sm hover:brightness-95 active:scale-[0.99] flex items-center justify-center gap-2 bg-[#527D91] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full mt-1 py-3 rounded-xl font-label-md text-label-md text-white font-semibold transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+            style={{
+              // Base metálica espelhada com gradiente neon (#527D91)
+              background: 'linear-gradient(135deg, #527D91 0%, #3A5F73 25%, #527D91 50%, #6BA3C8 75%, #527D91 100%)',
+              backgroundSize: '200% 200%',
+              backgroundPosition: submitting ? '50% 50%' : '0% 50%',
+              // Brilho metálico nas bordas + reflexo neon
+              boxShadow: submitting
+                ? '0 0 0 1px rgba(82,125,145,0.5), 0 2px 8px -4px rgba(82,125,145,0.4), inset 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)'
+                : '0 0 0 1px rgba(82,125,145,0.6), 0 4px 16px -4px rgba(82,125,145,0.5), 0 0 20px -8px rgba(82,125,145,0.7), inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.1)',
+              // Animação sutil do gradiente
+              animation: submitting ? 'none' : 'neon-shimmer 3s ease-in-out infinite',
+            }}
+            onMouseEnter={(e) => {
+              if (!submitting) {
+                const btn = e.currentTarget;
+                btn.style.backgroundPosition = '100% 50%';
+                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.8), 0 6px 24px -4px rgba(82,125,145,0.6), 0 0 32px -6px rgba(82,125,145,0.9), inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(0,0,0,0.1)';
+                btn.style.transform = 'translateY(-1px)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!submitting) {
+                const btn = e.currentTarget;
+                btn.style.backgroundPosition = '0% 50%';
+                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.6), 0 4px 16px -4px rgba(82,125,145,0.5), 0 0 20px -8px rgba(82,125,145,0.7), inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.1)';
+                btn.style.transform = 'translateY(0)';
+              }
+            }}
+            onMouseDown={(e) => {
+              if (!submitting) {
+                const btn = e.currentTarget;
+                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.5), 0 2px 8px -4px rgba(82,125,145,0.4), inset 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                btn.style.transform = 'translateY(0) scale(0.99)';
+              }
+            }}
+            onMouseUp={(e) => {
+              if (!submitting) {
+                const btn = e.currentTarget;
+                btn.style.boxShadow = '0 0 0 1px rgba(82,125,145,0.8), 0 6px 24px -4px rgba(82,125,145,0.6), 0 0 32px -6px rgba(82,125,145,0.9), inset 0 1px 0 rgba(255,255,255,0.2), inset 0 -1px 0 rgba(0,0,0,0.1)';
+                btn.style.transform = 'translateY(-1px)';
+              }
+            }}
+            aria-busy={submitting}
+            aria-label={submitting ? 'Autenticando, aguarde...' : 'Entrar no sistema'}
           >
             {submitting ? (
               <>
-                <span className="material-symbols-outlined text-[16px]">hourglass_empty</span>
+                <span className="material-symbols-outlined text-[16px] animate-spin" aria-hidden="true">hourglass_empty</span>
                 <span>Entrando...</span>
               </>
             ) : (
               <>
-                <span>Entrar no Sistema</span>
-                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                <span style={{ letterSpacing: '0.02em' }}>ENTRAR NO SISTEMA</span>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">arrow_forward</span>
               </>
             )}
+            {/* Reflexo de luz sutil na superfície (overlay) */}
+            <span
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 40%, rgba(255,255,255,0.04) 100%)',
+                pointerEvents: 'none',
+                borderRadius: 'inherit',
+              }}
+            />
           </button>
 
           {/* Link Esqueci minha senha */}
