@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { ConversationStatusIndicator } from './ConversationStatusIndicator';
+import { PieChartDeAtendimentos } from './PieChartDeAtendimentos';
 
 interface StatCardProps {
   title: string;
@@ -249,6 +250,7 @@ export default function Dashboard() {
 
       {isAdmin ? (
         <>
+          <PieChartDeAtendimentos isAdmin={isAdmin} />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 space-y-4">
               <div className="bg-[#17374A] p-4 rounded-xl border border-[#2B3D50] shadow-[0_2px_8px_-2px_rgba(52,68,92,0.05)]">

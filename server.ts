@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import {
-  computeConversationVisualStatusMap,
+  resolveConversationVisualStatus,
   type ConversationVisualStatus,
 } from './src/utils/conversationStatus.js';
 
@@ -1401,24 +1401,27 @@ app.delete('/api/quick-replies/:id', authMiddleware, async (req: AuthenticatedRe
 
 // Calcula o estado visual (não lida / sem resposta / respondida) a partir das
 // mensagens persistidas. O unread_count é a fonte de verdade para "não lida".
-async function loadConversationVisualStatuses(
+interface ConversationStatusDetails {
+  status: ConversationVisualStatus;
+  lastCustomerAt: string | null;
+  lastAgentAt: string | null;
+  lastAgentStatus: string | null;
+}
+
+async function loadConversationStatusDetails(
   conversations: Array<{ id: string; unread_count?: number | null }>
-): Promise<Record<string, ConversationVisualStatus>> {
+): Promise<Record<string, ConversationStatusDetails>> {
   if (!supabase || conversations.length === 0) {
     return {};
   }
 
   const ids = conversations.map((conversation) => conversation.id);
-  const unreadCounts = Object.fromEntries(
-    conversations.map((conversation) => [conversation.id, conversation.unread_count || 0])
-  );
 
-  const messages: Array<{
-    conversationId: string;
-    senderType: 'customer' | 'agent' | 'system' | 'internal_note';
-    createdAt: string;
-    status?: string | null;
-  }> = [];
+  // Última mensagem do cliente e última resposta válida do atendente.
+  // Mensagens com status 'failed' não chegaram ao cliente e não contam.
+  const lastCustomer = new Map<string, number>();
+  const lastAgent = new Map<string, number>();
+  const lastAgentStatus = new Map<string, string | null>();
 
   // Consulta em blocos para não estourar o tamanho da URL do PostgREST.
   const CHUNK_SIZE = 200;
@@ -1431,25 +1434,66 @@ async function loadConversationVisualStatuses(
 
     if (error) {
       console.error('[Conversas] Erro ao calcular status visual:', error.message);
-      return Object.fromEntries(
-        conversations.map((conversation) => [
-          conversation.id,
-          (conversation.unread_count || 0) > 0 ? 'unread' : 'awaiting_reply',
-        ])
-      );
+      const fallback: Record<string, ConversationStatusDetails> = {};
+      for (const conversation of conversations) {
+        fallback[conversation.id] = {
+          status: (conversation.unread_count || 0) > 0 ? 'unread' : 'awaiting_reply',
+          lastCustomerAt: null,
+          lastAgentAt: null,
+          lastAgentStatus: null,
+        };
+      }
+      return fallback;
     }
 
     for (const message of data || []) {
-      messages.push({
-        conversationId: message.conversation_id,
-        senderType: message.sender_type as 'customer' | 'agent' | 'system' | 'internal_note',
-        createdAt: message.created_at,
-        status: message.status,
-      });
+      if (message.sender_type !== 'customer' && message.sender_type !== 'agent') {
+        continue;
+      }
+
+      const timestamp = new Date(message.created_at).getTime();
+      if (Number.isNaN(timestamp)) {
+        continue;
+      }
+
+      if (message.sender_type === 'customer') {
+        const previous = lastCustomer.get(message.conversation_id);
+        if (previous === undefined || timestamp > previous) {
+          lastCustomer.set(message.conversation_id, timestamp);
+        }
+        continue;
+      }
+
+      // Resposta que falhou na Meta não conta como resposta válida.
+      if (message.status === 'failed') {
+        continue;
+      }
+
+      const previous = lastAgent.get(message.conversation_id);
+      if (previous === undefined || timestamp > previous) {
+        lastAgent.set(message.conversation_id, timestamp);
+        lastAgentStatus.set(message.conversation_id, message.status ?? null);
+      }
     }
   }
 
-  return computeConversationVisualStatusMap(ids, messages, unreadCounts);
+  const result: Record<string, ConversationStatusDetails> = {};
+  for (const conversation of conversations) {
+    const customerAt = lastCustomer.get(conversation.id) ?? null;
+    const agentAt = lastAgent.get(conversation.id) ?? null;
+    result[conversation.id] = {
+      status: resolveConversationVisualStatus({
+        unreadCount: conversation.unread_count || 0,
+        lastCustomerAt: customerAt,
+        lastAgentAt: agentAt,
+      }),
+      lastCustomerAt: customerAt === null ? null : new Date(customerAt).toISOString(),
+      lastAgentAt: agentAt === null ? null : new Date(agentAt).toISOString(),
+      lastAgentStatus: lastAgentStatus.get(conversation.id) ?? null,
+    };
+  }
+
+  return result;
 }
 
 // ============================================================================
@@ -1539,15 +1583,24 @@ app.get('/api/conversations', authMiddleware, async (req: AuthenticatedRequest, 
   }
 
   const conversations = data || [];
-  const visualStatuses = await loadConversationVisualStatuses(conversations);
+  const statusDetails = await loadConversationStatusDetails(conversations);
 
-  res.json(conversations.map((conv: any) => ({
-    ...conv,
-    contact_name: conv.contact?.name || '',
-    contact_phone: conv.contact?.phone || '',
-    assigned_name: conv.assignee?.name || null,
-    visual_status: visualStatuses[conv.id] || 'awaiting_reply',
-  })));
+  res.json(conversations.map((conv: any) => {
+    const details = statusDetails[conv.id];
+    return {
+      ...conv,
+      contact_name: conv.contact?.name || '',
+      contact_phone: conv.contact?.phone || '',
+      assigned_name: conv.assignee?.name || null,
+      visual_status: details?.status || 'awaiting_reply',
+      // Campos adicionais para o gráfico de pizza do painel administrativo.
+      // last_agent_message_status expõe apenas o estado de entrega/leitura,
+      // nunca o conteúdo da mensagem.
+      last_customer_at: details?.lastCustomerAt ?? null,
+      last_agent_at: details?.lastAgentAt ?? null,
+      last_agent_message_status: details?.lastAgentStatus ?? null,
+    };
+  }));
 });
 
 app.post('/api/conversations', authMiddleware, async (req: AuthenticatedRequest, res) => {
@@ -1932,14 +1985,14 @@ app.get('/api/dashboard/attendant-stats', authMiddleware, async (req: Authentica
     return res.status(500).json({ error: 'Erro ao carregar conversas.' });
   }
 
-  const visualStatuses = await loadConversationVisualStatuses(allConvs || []);
+  const statusDetails = await loadConversationStatusDetails(allConvs || []);
 
   const enrichedConvs = (allConvs || []).map((conv: any) => ({
     ...conv,
     contact_name: conv.contact?.name || '',
     contact_phone: conv.contact?.phone || '',
     assigned_name: conv.assignee?.name || null,
-    visual_status: visualStatuses[conv.id] || 'awaiting_reply',
+    visual_status: statusDetails[conv.id]?.status || 'awaiting_reply',
   }));
 
   // Filtra conversas atribuídas especificamente ao atendente autenticado
