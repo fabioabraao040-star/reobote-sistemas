@@ -81,12 +81,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       status: data.user.status,
       token: data.token,
       permissions: {
-        canManageAllUsers: data.user.role === 'admin' || data.user.role === 'master_admin',
+        // Permissões operacionais são exclusivas de 'admin'.
+        // master_admin NÃO herda poderes de admin: só configuração global.
+        canManageAllUsers: data.user.role === 'admin',
         canConfigureGlobalWhatsApp: data.user.role === 'master_admin',
-        canViewAllCompanies: data.user.role === 'admin' || data.user.role === 'master_admin',
-        canManageAutomations: data.user.role === 'admin' || data.user.role === 'master_admin',
-        canSendMessages: true,
-        canManageCompanyContacts: true,
+        canViewAllCompanies: data.user.role === 'admin',
+        canManageAutomations: data.user.role === 'admin',
+        canSendMessages: data.user.role !== 'master_admin',
+        canManageCompanyContacts: data.user.role !== 'master_admin',
       },
     };
 
@@ -120,7 +122,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'master_admin';
+  // 'isAdmin' representa SOMENTE o perfil admin operacional.
+  // master_admin é um perfil separado, sem permissões operacionais.
+  const isAdmin = user?.role === 'admin';
   const isMasterAdmin = user?.role === 'master_admin';
   const isUser = user?.role === 'user';
 

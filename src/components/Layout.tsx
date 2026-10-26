@@ -6,13 +6,17 @@ export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, isMasterAdmin, logout } = useAuth();
 
   const currentUser = user;
 
+  // Menu do ADM MASTER: apenas configuração global. Nenhum módulo operacional.
+  const masterNavItems = [
+    { name: 'Painel ADM MASTER', path: '/master-admin', icon: 'security', badge: 'Master' },
+  ];
+
   const adminNavItems = [
     { name: 'Dashboard Administrativo', path: '/dashboard', icon: 'dashboard', badge: 'Admin' },
-    { name: 'Configuração WhatsApp', path: '/dashboard?config=1', icon: 'settings', badge: 'Meta' },
     { name: 'Contatos de Clientes', path: '/contatos', icon: 'contacts' },
     { name: 'Usuários e Atendentes', path: '/atendentes', icon: 'manage_accounts', badge: 'Gestão' },
     { name: 'Mensagens Prontas', path: '/mensagens', icon: 'quickreply' },
@@ -25,7 +29,9 @@ export default function Layout() {
     { name: 'Mensagens Prontas', path: '/mensagens', icon: 'quickreply' },
   ];
 
-  const navItems = isAdmin ? adminNavItems : userNavItems;
+  const navItems = isMasterAdmin ? masterNavItems : isAdmin ? adminNavItems : userNavItems;
+
+  const panelHome = isMasterAdmin ? '/master-admin' : '/dashboard';
 
   const getPageTitle = (pathname: string) => {
     switch (pathname) {
@@ -41,6 +47,8 @@ export default function Layout() {
         return isAdmin ? 'Configuração de Automações Globais' : 'Automações da Empresa';
       case '/mensagens':
         return isAdmin ? 'Modelos de Mensagens do Sistema' : 'Mensagens Prontas';
+      case '/master-admin':
+        return 'Painel ADM MASTER';
       default:
         return 'Painel de Controle';
     }
@@ -51,8 +59,8 @@ export default function Layout() {
     navigate('/');
   };
 
-  // Determinar se está em uma tela interna (não é o dashboard)
-  const isDashboard = location.pathname === '/dashboard';
+  // Determinar se está em uma tela interna (não é o painel inicial do perfil)
+  const isDashboard = location.pathname === '/dashboard' || location.pathname === '/master-admin';
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const showBackButton = isMobile && !isDashboard;
 
@@ -65,9 +73,9 @@ export default function Layout() {
 
   // Lógica do botão voltar
   const handleBack = () => {
-    // Se estiver em uma sub-página, volta para o dashboard
-    if (location.pathname !== '/dashboard') {
-      navigate('/dashboard');
+    // Se estiver em uma sub-página, volta para o painel inicial do perfil
+    if (location.pathname !== panelHome) {
+      navigate(panelHome);
     } else {
       navigate('/');
     }
@@ -92,12 +100,12 @@ export default function Layout() {
         <div>
           {/* Cabeçalho da Sidebar */}
           <div className="h-16 px-5 border-b border-[#526673] flex items-center justify-between">
-            <Link to="/dashboard" className="flex items-center gap-2.5">
+            <Link to={panelHome} className="flex items-center gap-2.5">
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-[#263744] flex-shrink-0 bg-[#D0B783]"
               >
                 <span className="material-symbols-outlined text-[20px]">
-                  {isAdmin ? 'admin_panel_settings' : 'headset_mic'}
+                  {isMasterAdmin ? 'security' : isAdmin ? 'admin_panel_settings' : 'headset_mic'}
                 </span>
               </div>
               <div className="flex flex-col text-left">
@@ -105,7 +113,7 @@ export default function Layout() {
                   REOBOTE
                 </span>
                 <span className="text-[9px] uppercase tracking-widest font-semibold text-[#B4C5CE] mt-0.5">
-                  {isAdmin ? 'Painel Administrativo' : 'Central do Usuário'}
+                  {isMasterAdmin ? 'Configuração Global' : isAdmin ? 'Painel Administrativo' : 'Central do Usuário'}
                 </span>
               </div>
             </Link>
@@ -132,19 +140,21 @@ export default function Layout() {
             </div>
             <span
               className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide uppercase ${
-                isAdmin
-                  ? 'bg-[#EFA339]/10 text-[#F5C26B] border border-[#EFA339]/30'
-                  : 'bg-[#263744] text-[#D0B783] border border-[#D0B783]/30'
+                isMasterAdmin
+                  ? 'bg-[#D0B783]/15 text-[#D0B783] border border-[#D0B783]/40'
+                  : isAdmin
+                    ? 'bg-[#EFA339]/10 text-[#F5C26B] border border-[#EFA339]/30'
+                    : 'bg-[#263744] text-[#D0B783] border border-[#D0B783]/30'
               }`}
             >
-              {isAdmin ? 'Admin' : 'Usuário'}
+              {isMasterAdmin ? 'Master' : isAdmin ? 'Admin' : 'Usuário'}
             </span>
           </div>
 
           {/* Navegação Específica do Perfil */}
           <nav className="p-4 space-y-1 overflow-y-auto max-h-[calc(100vh-210px)]">
             <div className="px-3 pb-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-[#B4C5CE]/75">
-              {isAdmin ? 'Módulos Administrativos' : 'Menu Operacional'}
+              {isMasterAdmin ? 'Painel Master' : isAdmin ? 'Módulos Administrativos' : 'Menu Operacional'}
             </div>
             {navItems.map((item) => {
               // Itens com query string (ex.: /dashboard?config=1) são comparados
@@ -200,8 +210,12 @@ export default function Layout() {
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 text-white ${
-                  isAdmin ? 'bg-[#527D91]' : 'bg-[#2D404D]'
+                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${
+                  isMasterAdmin
+                    ? 'bg-[#D0B783] text-[#263744]'
+                    : isAdmin
+                      ? 'bg-[#527D91] text-white'
+                      : 'bg-[#2D404D] text-white'
                 }`}
               >
                 {currentUser?.avatarText || '—'}
@@ -263,17 +277,23 @@ export default function Layout() {
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#39AC6B]/10 border border-[#39AC6B]/30 text-[#8FE3AC] text-xs font-medium">
               <span className="w-2 h-2 rounded-full bg-[#39AC6B] animate-pulse" />
               <span>
-                {isAdmin ? 'WhatsApp Master API: Ativo' : 'WhatsApp Unidade: Conectado'}
+                {isMasterAdmin
+                  ? 'Meta Cloud API: Monitorada'
+                  : isAdmin
+                    ? 'WhatsApp Master API: Ativo'
+                    : 'WhatsApp Unidade: Conectado'}
               </span>
             </div>
 
-            <Link
-              to="/atendimento"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs"
-            >
-              <span className="material-symbols-outlined text-[16px]">headset_mic</span>
-              <span className="hidden sm:inline">Central</span>
-            </Link>
+            {!isMasterAdmin && (
+              <Link
+                to="/atendimento"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs"
+              >
+                <span className="material-symbols-outlined text-[16px]">headset_mic</span>
+                <span className="hidden sm:inline">Central</span>
+              </Link>
+            )}
           </div>
         </header>
 

@@ -35,7 +35,7 @@ export default function App() {
             <Route
               path="/master-admin"
               element={
-                <ProtectedRoute requiredRole="master_admin">
+                <ProtectedRoute allowedRoles={['master_admin']}>
                   <MasterAdminDashboard />
                 </ProtectedRoute>
               }
@@ -45,7 +45,7 @@ export default function App() {
             <Route
               path="/dashboard"
               element={
-                <ProtectedRoute requiredRole="admin">
+                <ProtectedRoute allowedRoles={['admin', 'user']}>
                   <Dashboard />
                 </ProtectedRoute>
               }
@@ -55,7 +55,7 @@ export default function App() {
             <Route
               path="/atendimento"
               element={
-                <ProtectedRoute requiredRole="user">
+                <ProtectedRoute allowedRoles={['admin', 'user']}>
                   <AtendimentoWhatsApp />
                 </ProtectedRoute>
               }
@@ -64,7 +64,7 @@ export default function App() {
             <Route
               path="/contatos"
               element={
-                <ProtectedRoute requiredRole="admin">
+                <ProtectedRoute allowedRoles={['admin', 'user']}>
                   <Contatos />
                 </ProtectedRoute>
               }
@@ -73,7 +73,7 @@ export default function App() {
             <Route
               path="/atendentes"
               element={
-                <ProtectedRoute requiredRole="admin">
+                <ProtectedRoute allowedRoles={['admin']}>
                   <Atendentes />
                 </ProtectedRoute>
               }
@@ -82,7 +82,7 @@ export default function App() {
             <Route
               path="/automacoes"
               element={
-                <ProtectedRoute requiredRole="admin">
+                <ProtectedRoute allowedRoles={['admin']}>
                   <Automacoes />
                 </ProtectedRoute>
               }
@@ -91,7 +91,7 @@ export default function App() {
             <Route
               path="/mensagens"
               element={
-                <ProtectedRoute requiredRole="admin">
+                <ProtectedRoute allowedRoles={['admin', 'user']}>
                   <MensagensProntas />
                 </ProtectedRoute>
               }

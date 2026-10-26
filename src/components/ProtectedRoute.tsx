@@ -2,21 +2,15 @@ import React from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-type UserRole = 'master_admin' | 'admin' | 'user';
+export type UserRole = 'master_admin' | 'admin' | 'user';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: UserRole;
-}
-
-function hasRequiredRole(userRole: UserRole, requiredRole?: UserRole): boolean {
-  if (!requiredRole) return true;
-  const roleHierarchy: Record<UserRole, number> = {
-    master_admin: 3,
-    admin: 2,
-    user: 1,
-  };
-  return roleHierarchy[userRole] >= roleHierarchy[requiredRole];
+  /**
+   * Lista explícita de papéis autorizados. Sem herança entre papéis:
+   * master_admin NÃO acessa rotas de admin e vice-versa.
+   */
+  allowedRoles?: UserRole[];
 }
 
 function getRoleLabel(role: UserRole): string {
@@ -27,7 +21,15 @@ function getRoleLabel(role: UserRole): string {
   }
 }
 
-export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+function getHomePath(role: UserRole): string {
+  switch (role) {
+    case 'master_admin': return '/master-admin';
+    case 'admin': return '/dashboard';
+    case 'user': return '/atendimento';
+  }
+}
+
+export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { user, loading } = useAuth();
 
   // Aguarda a restauração da sessão do sessionStorage antes de decidir.
@@ -48,9 +50,14 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     return <Navigate to="/" replace />;
   }
 
-  // Verifica se o usuário tem o papel necessário
-  if (requiredRole && !hasRequiredRole(user.role, requiredRole)) {
-    const requiredLabel = getRoleLabel(requiredRole);
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    // O ADM MASTER é redirecionado para o painel exclusivo dele, nunca para
+    // uma tela de erro — ele simplesmente não tem telas operacionais.
+    if (user.role === 'master_admin') {
+      return <Navigate to="/master-admin" replace />;
+    }
+
+    const requiredLabel = allowedRoles.map(getRoleLabel).join(' ou ');
     const currentLabel = getRoleLabel(user.role);
 
     return (
@@ -66,12 +73,12 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
             Privilégios de {requiredLabel} Necessários
           </h2>
           <p className="text-sm text-[#B4C5CE] mb-6 leading-relaxed">
-            Seu perfil atual é <strong>{user.name}</strong> ({currentLabel}). 
+            Seu perfil atual é <strong>{user.name}</strong> ({currentLabel}).
             Você não possui autorização para acessar esta área.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link
-              to="/dashboard"
+              to={getHomePath(user.role)}
               className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs flex items-center justify-center gap-1.5"
             >
               <span className="material-symbols-outlined text-[16px]">arrow_back</span>

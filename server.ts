@@ -14,6 +14,14 @@ dotenv.config();
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Endpoints que o ADM MASTER pode acessar. Todo o resto da API é operacional
+// (contatos, conversas, usuários, automações, métricas) e fica bloqueado para
+// esse perfil, inclusive em chamada direta.
+const MASTER_ADMIN_ALLOWED_PATHS = new Set<string>([
+  '/api/whatsapp/config',
+  '/api/whatsapp/verify-connection',
+]);
+
 // Validação leve de campos de texto: evita 500 quando o cliente envia
 // número/objeto onde o código espera string (.trim/.toLowerCase).
 function invalidStringField(payload: Record<string, unknown>, fields: string[]): string | null {
@@ -244,6 +252,18 @@ const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: Ne
     req.authUserId = dbUser.id;
     req.authUserName = dbUser.name;
 
+    // O ADM MASTER é um perfil exclusivo de configuração global: NÃO possui
+    // permissões operacionais. O bloqueio é feito aqui, no servidor, para que
+    // chamadas diretas à API também sejam negadas (esconder menu não basta).
+    if (req.authRole === 'master_admin') {
+      const requestPath = `${req.baseUrl}${req.path}`.replace(/\/+$/, '');
+      if (!MASTER_ADMIN_ALLOWED_PATHS.has(requestPath)) {
+        return res.status(403).json({
+          error: 'Acesso Proibido: o perfil ADM MASTER é exclusivo do painel de configuração global.',
+        });
+      }
+    }
+
     next();
   } catch (err: any) {
     return res.status(401).json({ error: 'Falha na autenticação: ' + err.message });
@@ -251,8 +271,8 @@ const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: Ne
 };
 
 const adminOnlyMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  // admin e master_admin têm acesso administrativo
-  if (req.authRole !== 'admin' && req.authRole !== 'master_admin') {
+  // Apenas o admin operacional. master_admin NÃO herda poderes de admin.
+  if (req.authRole !== 'admin') {
     return res.status(403).json({
       error: 'Acesso Proibido: Esta operação exige privilégios de Administrador.',
     });

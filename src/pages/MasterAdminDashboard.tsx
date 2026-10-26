@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 
 interface WhatsAppConfig {
@@ -27,7 +26,6 @@ interface VerifyConnectionResult {
 }
 
 export default function MasterAdminDashboard() {
-  const navigate = useNavigate();
   const [config, setConfig] = useState<WhatsAppConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -162,10 +160,9 @@ export default function MasterAdminDashboard() {
             Configuração oficial da Meta WhatsApp Business Cloud API e diagnóstico de integração.
           </p>
         </div>
-        <Link to="/dashboard" className="text-xs font-semibold text-[#D0B783] hover:text-[#E1E8EC] flex items-center gap-1 transition-colors">
-          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-          <span>Voltar ao Dashboard</span>
-        </Link>
+        <span className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-lg bg-[#263744] text-[#B4C5CE] border border-[#526673]">
+          Acesso exclusivo • ADM MASTER
+        </span>
       </div>
 
       {/* Status Card */}
