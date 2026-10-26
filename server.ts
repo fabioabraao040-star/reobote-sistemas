@@ -9,6 +9,13 @@ import {
   resolveConversationVisualStatus,
   type ConversationVisualStatus,
 } from './src/utils/conversationStatus.js';
+import {
+  buildMonitoringPayload,
+  monitoringSecretIsConfigured,
+  safeSecretMatch,
+  withTimeout,
+  type MonitoringWhatsAppStatus,
+} from './monitoring.js';
 
 dotenv.config();
 
@@ -33,6 +40,11 @@ function invalidStringField(payload: Record<string, unknown>, fields: string[]):
 }
 
 const app = express();
+
+// A aplicação roda atrás da Vercel. Sem confiar em UM proxy, o express-rate-limit
+// enxerga todos os clientes com o mesmo IP e registra ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+// Isso também vale para o endpoint de monitoramento servidor a servidor.
+app.set('trust proxy', 1);
 
 // O webhook da Meta exige o corpo bruto (Buffer) para validar a assinatura HMAC.
 // Precisa ser registrado ANTES do express.json(), que consumiria o corpo.
@@ -63,12 +75,27 @@ app.use(helmet.crossOriginResourcePolicy({ policy: 'cross-origin' }));
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   limit: 300, // máximo 300 requisições por IP por janela de 15 min
-  skip: (req) => req.originalUrl.startsWith('/api/webhook/whatsapp'),
+  // O webhook é autenticado por HMAC e o monitoramento servidor a servidor tem
+  // limite próprio; ambos ficam fora do balde compartilhado da API.
+  skip: (req) =>
+    req.originalUrl.startsWith('/api/webhook/whatsapp') ||
+    req.originalUrl.startsWith('/api/monitoring/'),
   message: { error: 'Muitas requisições. Tente novamente mais tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 app.use('/api/', apiLimiter);
+
+// Rate limit dedicado para a integração de monitoramento. Evita que um cliente
+// do REOBOTE SUPORTE (ou um segredo vazado) consuma o limite dos usuários.
+const monitoringLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  message: { error: 'Muitas consultas de monitoramento. Tente novamente mais tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/monitoring/', monitoringLimiter);
 
 // Rate limiting mais rígido para rotas de autenticação
 const authLimiter = rateLimit({
@@ -292,6 +319,88 @@ const masterAdminOnlyMiddleware = (req: AuthenticatedRequest, res: Response, nex
 // ============================================================================
 // ROTAS DE API DO SISTEMA (BACKEND REST)
 // ============================================================================
+
+// ============================================================================
+// MONITORAMENTO SERVIDOR A SERVIDOR (REOBOTE SUPORTE)
+// ============================================================================
+// Autenticação exclusiva por segredo, sem JWT de usuário e sem reutilizar o
+// verify token do WhatsApp. Retorna SOMENTE indicadores: nenhum contato,
+// conversa, mensagem, telefone, token ou conteúdo de tabela é exposto.
+app.get('/api/monitoring/status', async (req, res) => {
+  const expectedSecret = process.env.REOBOTE_MONITORING_SECRET || '';
+
+  if (!monitoringSecretIsConfigured(expectedSecret)) {
+    return res.status(503).json({ error: 'Monitoramento não configurado.' });
+  }
+
+  const providedSecret = req.header('x-monitoring-secret') || '';
+  if (!safeSecretMatch(providedSecret, expectedSecret)) {
+    return res.status(401).json({ error: 'Credencial de monitoramento inválida.' });
+  }
+
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (!supabase) {
+    return res.json(
+      buildMonitoringPayload({
+        uptimeSeconds: process.uptime(),
+        supabase: { ok: false, latencyMs: null },
+        whatsapp: { status: 'unavailable', lastCheck: null },
+      })
+    );
+  }
+
+  const startedAt = Date.now();
+  let supabaseOk = false;
+
+  try {
+    const dbResult = await withTimeout(
+      supabase.from('companies').select('id', { head: true }).limit(1),
+      3000,
+      'db-timeout'
+    );
+    supabaseOk = !dbResult.error;
+  } catch {
+    supabaseOk = false;
+  }
+
+  const dbLatencyMs = Date.now() - startedAt;
+  let whatsappStatus: MonitoringWhatsAppStatus = 'unavailable';
+  let whatsappLastCheck: string | null = null;
+
+  if (supabaseOk) {
+    try {
+      const waResult = await withTimeout(
+        supabase
+          .from('whatsapp_configs')
+          .select('is_verified,last_health_check')
+          .limit(1)
+          .maybeSingle(),
+        3000,
+        'whatsapp-timeout'
+      );
+
+      if (waResult.error) {
+        whatsappStatus = 'unavailable';
+      } else if (!waResult.data) {
+        whatsappStatus = 'not_configured';
+      } else {
+        whatsappStatus = waResult.data.is_verified ? 'connected' : 'configured';
+        whatsappLastCheck = waResult.data.last_health_check || null;
+      }
+    } catch {
+      whatsappStatus = 'unavailable';
+    }
+  }
+
+  return res.json(
+    buildMonitoringPayload({
+      uptimeSeconds: process.uptime(),
+      supabase: { ok: supabaseOk, latencyMs: dbLatencyMs },
+      whatsapp: { status: whatsappStatus, lastCheck: whatsappLastCheck },
+    })
+  );
+});
 
 // 1. WhatsApp Official Meta API Configuration (Admin Only)
 app.get('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {
