@@ -3,6 +3,7 @@ import {
   buildEmergencyAIStatusResponse,
   resolveWhatsAppIntegrationState,
   isGeminiApiKeyConfigured,
+  normalizeGeminiApiKey,
   EMERGENCY_AI_DEFAULT_MODEL,
   type EmergencyAIHistoryResponse,
   type EmergencyAIStatusResponse,
@@ -138,7 +139,7 @@ export function createEmergencyAIService(options: {
 }): EmergencyAIService {
   const logger = options.logger ?? console;
   const geminiApiKey = isGeminiApiKeyConfigured(options.geminiApiKey)
-    ? (options.geminiApiKey as string)
+    ? normalizeGeminiApiKey(options.geminiApiKey)
     : null;
 
   // Cliente de IA inicializado exclusivamente no backend, com a chave

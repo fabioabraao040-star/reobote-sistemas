@@ -95,8 +95,27 @@ function clean(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+/**
+ * Normaliza o valor recebido por variável de ambiente. Alguns painéis salvam
+ * o valor com aspas ou espaços ao redor; isso não faz parte da chave e faria
+ * o provedor rejeitá-la. O valor nunca é exposto ao frontend nem aos logs.
+ */
+export function normalizeGeminiApiKey(value: string | null | undefined): string | null {
+  let secret = clean(value);
+  if (!secret) return null;
+
+  if (
+    (secret.startsWith('"') && secret.endsWith('"')) ||
+    (secret.startsWith("'") && secret.endsWith("'"))
+  ) {
+    secret = secret.slice(1, -1).trim();
+  }
+
+  return secret || null;
+}
+
 function isConfiguredSecret(value: string | null | undefined): boolean {
-  const secret = clean(value);
+  const secret = normalizeGeminiApiKey(value);
   return secret !== null && secret !== GEMINI_PLACEHOLDER_KEY;
 }
 

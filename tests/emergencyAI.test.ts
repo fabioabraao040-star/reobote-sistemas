@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   buildEmergencyAIStatusResponse,
   defaultEmergencyAIConfigView,
+  normalizeGeminiApiKey,
   parseEmergencyAIHistoryLimit,
   resolveProviderIntegrationState,
   resolveWhatsAppIntegrationState,
@@ -149,6 +150,32 @@ test('estado do provedor distingue pendente, configurado e indisponível', () =>
   );
 });
 
+test('normaliza aspas e espaços da chave Gemini sem expor o valor', () => {
+  assert.equal(normalizeGeminiApiKey('  "AIza-chave-de-teste"  '), 'AIza-chave-de-teste');
+  assert.equal(normalizeGeminiApiKey(" 'AIza-chave-de-teste' "), 'AIza-chave-de-teste');
+  assert.equal(normalizeGeminiApiKey('  AIza-chave-de-teste  '), 'AIza-chave-de-teste');
+  assert.equal(normalizeGeminiApiKey('   '), null);
+  assert.equal(normalizeGeminiApiKey('""'), null);
+  assert.equal(normalizeGeminiApiKey(null), null);
+
+  assert.equal(
+    resolveProviderIntegrationState({
+      provider: 'gemini',
+      model: 'gemini-2.5-flash-lite',
+      geminiApiKey: '  "AIza-chave-de-teste"  ',
+    }),
+    'configured'
+  );
+  assert.equal(
+    resolveProviderIntegrationState({
+      provider: 'gemini',
+      model: 'gemini-2.5-flash-lite',
+      geminiApiKey: '  "MY_GEMINI_API_KEY"  ',
+    }),
+    'unavailable'
+  );
+});
+
 test('estado do WhatsApp distingue configurado, pendente e indisponível', () => {
   assert.equal(resolveWhatsAppIntegrationState(null), 'unavailable');
   assert.equal(
@@ -216,6 +243,26 @@ test('serviço consulta configuração ausente como desativada', async () => {
   const status = await service.getStatus();
   assert.equal(status.config.enabled, false);
   assert.equal(status.whatsapp.status, 'configured');
+});
+
+test('serviço normaliza a chave com aspas e não a devolve no status', async () => {
+  const harness = makeStore();
+  harness.setConfig(
+    makeConfig({
+      enabled: true,
+      provider: 'gemini',
+      model: 'gemini-2.5-flash-lite',
+    })
+  );
+  const service = createEmergencyAIService({
+    store: harness.store,
+    geminiApiKey: '  "AIza-chave-de-teste"  ',
+    logger: { error() {} },
+  });
+
+  const status = await service.getStatus();
+  assert.equal(status.provider.status, 'configured');
+  assert.equal(JSON.stringify(status).includes('AIza-chave-de-teste'), false);
 });
 
 test('serviço ativa e desativa com motivo e responsável auditáveis', async () => {
