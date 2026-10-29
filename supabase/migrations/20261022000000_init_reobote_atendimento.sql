@@ -1,5 +1,5 @@
 -- ============================================================================
--- REOBOTE SISTEMA ATENDIMENTO
+-- REOBOTE SISTEMAS — ATENDIMENTO
 -- Migration inicial para um projeto Supabase NOVO e exclusivo.
 --
 -- Objetivo:
@@ -340,6 +340,7 @@ create table if not exists public.conversations (
     last_message text not null default '',
     last_message_at timestamptz not null default now(),
     unread_count integer not null default 0 check (unread_count >= 0),
+    opened_at timestamptz,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -349,6 +350,8 @@ alter table public.conversations
   add column if not exists last_message text not null default '';
 alter table public.conversations
   add column if not exists updated_at timestamptz not null default now();
+alter table public.conversations
+  add column if not exists opened_at timestamptz;
 
 alter table public.conversations
   alter column last_message set default '';
@@ -357,6 +360,8 @@ alter table public.conversations
 
 comment on table public.conversations is
   'Atendimentos por empresa. last_message e updated_at são usados pelo backend atual.';
+comment on column public.conversations.opened_at is
+  'Última abertura da conversa por um atendente no REOBOTE. NULL quando ainda não aberta ou em dados históricos.';
 
 -- ----------------------------------------------------------------------------
 -- 6. Mensagens

@@ -7,6 +7,8 @@ import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import {
   resolveConversationVisualStatus,
+  resolveEffectiveConversationOpenedAt,
+  resolveEffectiveConversationRepliedAt,
   type ConversationVisualStatus,
 } from './src/utils/conversationStatus.js';
 import {
@@ -16,6 +18,20 @@ import {
   withTimeout,
   type MonitoringWhatsAppStatus,
 } from './monitoring.js';
+import {
+  adminOnlyMiddleware,
+  createAuthMiddleware,
+  masterAdminOnlyMiddleware,
+  type AuthenticatedRequest,
+} from './src/server/authMiddleware.js';
+import { createEmergencyAIRouter } from './src/server/emergencyAIRoutes.js';
+import { createEmergencyAIService } from './src/server/emergencyAIService.js';
+import { createSupabaseEmergencyAIStore } from './src/server/emergencyAIStore.js';
+import {
+  processEmergencyAIInbound,
+  type EmergencyAIConversationSnapshot,
+  type EmergencyAIWebhookAdapter,
+} from './src/server/emergencyAIWebhook.js';
 
 dotenv.config();
 
@@ -37,6 +53,19 @@ function invalidStringField(payload: Record<string, unknown>, fields: string[]):
     if (value !== undefined && typeof value !== 'string') return field;
   }
   return null;
+}
+
+function canAccessConversation(
+  authRole: AuthenticatedRequest['authRole'],
+  authCompanyId: AuthenticatedRequest['authCompanyId'],
+  conversation: { company_id?: string; assigned_to?: string | null } | null | undefined,
+  authUserId?: string,
+): boolean {
+  if (!conversation?.company_id) return false;
+  if (!authCompanyId || conversation.company_id !== authCompanyId) return false;
+  if (authRole === 'admin') return true;
+  if (authRole === 'user') return conversation.assigned_to === authUserId;
+  return false;
 }
 
 const app = express();
@@ -177,6 +206,7 @@ interface Conversation {
   assigned_to?: string;
   status: 'open' | 'in_progress' | 'closed';
   last_message_at?: string;
+  opened_at?: string;
   unread_count?: number;
   created_at?: string;
 }
@@ -236,85 +266,19 @@ interface WhatsAppConfig {
 // MIDDLEWARE DE AUTENTICAÇÃO REAL (JWT via Supabase)
 // ============================================================================
 
-interface AuthenticatedRequest extends Request {
-  authRole?: 'master_admin' | 'admin' | 'user';
-  authCompanyId?: string;
-  authUserId?: string;
-  authUserName?: string;
-}
+const authMiddleware = createAuthMiddleware({
+  getSupabase: () => supabase,
+  getSupabaseAuth: () => supabaseAuth,
+  masterAdminAllowedPaths: MASTER_ADMIN_ALLOWED_PATHS,
+});
 
-const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers['authorization'];
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token de autenticação não fornecido.' });
-  }
-
-  const token = authHeader.substring(7);
-
-  if (!supabase || !supabaseAuth) {
-    return res.status(500).json({ error: 'Serviço de autenticação não configurado no servidor.' });
-  }
-
-  try {
-    const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
-
-    if (error || !user) {
-      return res.status(401).json({ error: 'Token inválido ou expirado.' });
-    }
-
-    // Busca dados do usuário na tabela users
-    const { data: dbUser, error: userError } = await supabase
-      .from('users')
-      .select('id, company_id, name, email, role, status')
-      .eq('id', user.id)
-      .single();
-
-    if (userError || !dbUser) {
-      return res.status(401).json({ error: 'Usuário não encontrado no sistema.' });
-    }
-
-    req.authRole = dbUser.role as 'master_admin' | 'admin' | 'user';
-    req.authCompanyId = dbUser.company_id;
-    req.authUserId = dbUser.id;
-    req.authUserName = dbUser.name;
-
-    // O ADM MASTER é um perfil exclusivo de configuração global: NÃO possui
-    // permissões operacionais. O bloqueio é feito aqui, no servidor, para que
-    // chamadas diretas à API também sejam negadas (esconder menu não basta).
-    if (req.authRole === 'master_admin') {
-      const requestPath = `${req.baseUrl}${req.path}`.replace(/\/+$/, '');
-      if (!MASTER_ADMIN_ALLOWED_PATHS.has(requestPath)) {
-        return res.status(403).json({
-          error: 'Acesso Proibido: o perfil ADM MASTER é exclusivo do painel de configuração global.',
-        });
-      }
-    }
-
-    next();
-  } catch (err: any) {
-    return res.status(401).json({ error: 'Falha na autenticação: ' + err.message });
-  }
-};
-
-const adminOnlyMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  // Apenas o admin operacional. master_admin NÃO herda poderes de admin.
-  if (req.authRole !== 'admin') {
-    return res.status(403).json({
-      error: 'Acesso Proibido: Esta operação exige privilégios de Administrador.',
-    });
-  }
-  next();
-};
-
-const masterAdminOnlyMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  if (req.authRole !== 'master_admin') {
-    return res.status(403).json({
-      error: 'Acesso Proibido: Esta operação é exclusiva do ADM MASTER.',
-    });
-  }
-  next();
-};
+// Serviço administrativo da IA de Emergência. A configuração é global, como a
+// configuração oficial do WhatsApp no modelo atual. A autorização real de ADM
+// é aplicada pelo middleware e novamente dentro do router.
+const emergencyAIService = createEmergencyAIService({
+  store: createSupabaseEmergencyAIStore(() => supabase),
+  geminiApiKey: process.env.GEMINI_API_KEY || null,
+});
 
 // ============================================================================
 // ROTAS DE API DO SISTEMA (BACKEND REST)
@@ -401,6 +365,14 @@ app.get('/api/monitoring/status', async (req, res) => {
     })
   );
 });
+
+// ============================================================================
+// IA DE EMERGÊNCIA (somente ADM operacional)
+// ============================================================================
+// O router aplica adminOnlyMiddleware internamente. O authMiddleware valida o
+// JWT e o papel lido do banco; nenhum perfil enviado pelo navegador é aceito.
+// As rotas não alteram o webhook nem enviam mensagens nesta etapa.
+app.use('/api/emergency-ai', authMiddleware, createEmergencyAIRouter(emergencyAIService));
 
 // 1. WhatsApp Official Meta API Configuration (Admin Only)
 app.get('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {
@@ -652,12 +624,18 @@ app.get('/api/webhook/whatsapp', async (req, res) => {
 });
 
 // Webhook Oficial da Meta (Recebimento de Eventos POST)
+// A resposta automática da IA de Emergência é opcional e fail-closed: só ocorre
+// quando a configuração persistida está enabled = true, a conversa é elegível e
+// não há atendente humano responsável. Qualquer erro de leitura ou geração
+// mantém o atendimento humano normal.
 app.post('/api/webhook/whatsapp', async (req, res) => {
   const signature = req.headers['x-hub-signature-256'];
 
   if (!supabase) {
     return res.status(500).send('Erro interno.');
   }
+
+  const db = supabase;
 
   if (!signature) {
     return res.status(401).send('Assinatura ausente.');
@@ -702,15 +680,18 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
   try {
     // A configuração é global no schema atual. Se houver company_id, usa;
     // caso contrário, resolve pela primeira unidade (cenário de uma empresa).
-    const { data: cfg } = await supabase
+    // phone_number identifica mensagens enviadas pela própria empresa, que
+    // nunca devem receber resposta automática.
+    const { data: cfg } = await db
       .from('whatsapp_configs')
-      .select('company_id')
+      .select('company_id, phone_number')
       .limit(1)
       .maybeSingle();
 
+    const businessPhone = String(cfg?.phone_number || '').replace(/\D/g, '');
     let companyId: string | null = cfg?.company_id || null;
     if (!companyId) {
-      const { data: firstCompany } = await supabase
+      const { data: firstCompany } = await db
         .from('companies')
         .select('id')
         .order('created_at', { ascending: true })
@@ -737,6 +718,14 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
         for (const inbound of inboundMessages) {
           const from = String(inbound?.from || '').replace(/\D/g, '');
           if (!from) continue;
+
+          // Mensagem enviada pela própria empresa/sistema nunca é respondida.
+          if (businessPhone && from === businessPhone) continue;
+
+          const isCustomerTextMessage =
+            inbound?.type === 'text' &&
+            typeof inbound?.text?.body === 'string' &&
+            inbound.text.body.trim().length > 0;
 
           if (inbound?.id) {
             const { data: existingMessage } = await supabase
@@ -829,13 +818,13 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
           // Insere a mensagem ANTES de contabilizar não-lidas. Se a Meta
           // reenviar o mesmo evento, o índice único em whatsapp_message_id
           // rejeita a duplicata e o contador da conversa não é incrementado.
-          const { error: messageError } = await supabase.from('messages').insert({
+          const { data: insertedMessage, error: messageError } = await supabase.from('messages').insert({
             conversation_id: conversationId,
             sender_type: 'customer',
             content,
             status: 'delivered',
             whatsapp_message_id: inbound?.id || null,
-          });
+          }).select('id').single();
 
           if (messageError) {
             if (messageError.code === '23505') {
@@ -853,6 +842,133 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
               unread_count: isNewConversation ? 1 : (existingConv?.unread_count || 0) + 1,
             })
             .eq('id', conversationId);
+
+          if (!conversationId) continue;
+
+          // IA de Emergência: só texto de cliente e somente após a mensagem
+          // estar persistida. O orquestrador consulta o estado persistido antes
+          // de gerar e novamente antes de enviar. Falhas não impedem o
+          // atendimento humano.
+          if (isCustomerTextMessage && inbound?.id) {
+            const inboundRowId = insertedMessage?.id || null;
+
+            const emergencyAIAdapter: EmergencyAIWebhookAdapter = {
+              async getConversation(targetConversationId) {
+                const { data } = await db
+                  .from('conversations')
+                  .select('id, company_id, assigned_to, status')
+                  .eq('id', targetConversationId)
+                  .maybeSingle();
+                return (data as EmergencyAIConversationSnapshot | null) ?? null;
+              },
+              async hasAgentReplySince(targetConversationId, sinceIso) {
+                const { data } = await db
+                  .from('messages')
+                  .select('id')
+                  .eq('conversation_id', targetConversationId)
+                  .eq('sender_type', 'agent')
+                  .gt('created_at', sinceIso)
+                  .limit(1);
+                return Array.isArray(data) && data.length > 0;
+              },
+              async claimInboundEvent({ companyId: eventCompanyId, conversationId: eventConversationId, inboundMessageId }) {
+                const { error } = await db.from('emergency_ai_events').insert({
+                  company_id: eventCompanyId,
+                  conversation_id: eventConversationId,
+                  inbound_message_id: inboundRowId,
+                  event_type: 'inbound_detected',
+                  outcome: 'allowed',
+                  idempotency_key: `emergency-ai:inbound:${inboundMessageId}`,
+                });
+                if (!error) return 'claimed';
+                if (error.code === '23505') return 'duplicate';
+                // Migration ainda não aplicada: a deduplicação primária segue
+                // garantida pelo índice único de messages.whatsapp_message_id.
+                console.warn(
+                  '[IA de Emergência] Claim idempotente indisponível:',
+                  error.code || 'erro'
+                );
+                return 'unavailable';
+              },
+              async getContactPhone(contactId) {
+                const { data } = await db
+                  .from('contacts')
+                  .select('phone')
+                  .eq('id', contactId)
+                  .maybeSingle();
+                return data?.phone ?? null;
+              },
+              async insertAiMessage({ conversationId: aiConversationId, content: aiContent }) {
+                const { data, error } = await db
+                  .from('messages')
+                  .insert({
+                    conversation_id: aiConversationId,
+                    sender_type: 'system',
+                    sender_id: null,
+                    content: aiContent,
+                    status: 'sent',
+                  })
+                  .select('id')
+                  .single();
+                if (error || !data) {
+                  console.error('[IA de Emergência] Erro ao registrar resposta:', error?.message);
+                  return null;
+                }
+                return data.id;
+              },
+              async setAiMessageWhatsAppId(messageId, whatsappMessageId) {
+                await db
+                  .from('messages')
+                  .update({ whatsapp_message_id: whatsappMessageId, status: 'sent' })
+                  .eq('id', messageId);
+              },
+              async markAiMessageFailed(messageId) {
+                await db.from('messages').update({ status: 'failed' }).eq('id', messageId);
+              },
+              async touchConversation({ conversationId: aiConversationId, content: aiContent, at }) {
+                const error = await updateConversationState(aiConversationId, {
+                  last_message: aiContent,
+                  last_message_at: at,
+                  unread_count: 0,
+                });
+                if (error) {
+                  console.error('[IA de Emergência] Erro ao atualizar conversa:', error.message);
+                }
+              },
+              async getDispatchConfig() {
+                return getWhatsAppDispatchConfig();
+              },
+              async dispatchText(dispatchParams) {
+                return dispatchWhatsAppText(dispatchParams);
+              },
+            };
+
+            const aiResult = await processEmergencyAIInbound({
+              service: emergencyAIService,
+              adapter: emergencyAIAdapter,
+              input: {
+                conversationId,
+                companyId,
+                contactId: contact.id,
+                customerMessage: content,
+                inboundMessageId: String(inbound.id),
+                receivedAt: now,
+                isCustomerTextMessage: true,
+              },
+            });
+
+            if (
+              aiResult.status === 'error' ||
+              aiResult.status === 'generation_failed' ||
+              aiResult.status === 'dispatch_failed'
+            ) {
+              console.error(
+                '[IA de Emergência] Resultado do processamento:',
+                aiResult.status,
+                aiResult.reason || ''
+              );
+            }
+          }
         }
 
         // Atualizações de entrega/leitura das mensagens enviadas
@@ -1538,17 +1654,65 @@ app.delete('/api/quick-replies/:id', authMiddleware, async (req: AuthenticatedRe
   res.json({ success: true, message: 'Mensagem pronta excluída com sucesso.' });
 });
 
-// Calcula o estado visual (não lida / sem resposta / respondida) a partir das
-// mensagens persistidas. O unread_count é a fonte de verdade para "não lida".
+// Calcula o estado visual (não aberta / sem resposta / respondida) a partir das
+// mensagens persistidas. O unread_count e o opened_at identificam a não abertura.
 interface ConversationStatusDetails {
   status: ConversationVisualStatus;
   lastCustomerAt: string | null;
   lastAgentAt: string | null;
   lastAgentStatus: string | null;
+  openedAt: string | null;
+}
+
+function isMissingOpenedAtColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === 'PGRST204' || error.code === '42703') return true;
+  return /opened_at/i.test(error.message || '');
+}
+
+let warnedMissingOpenedAtColumn = false;
+
+/**
+ * Atualiza a conversa com opened_at quando a coluna existe. Em bancos que ainda
+ * não receberam a migration, repete a atualização sem a coluna para não quebrar
+ * o recebimento/leitura do WhatsApp.
+ */
+async function updateConversationState(
+  conversationId: string,
+  update: Record<string, unknown>
+): Promise<{ code?: string; message?: string } | null> {
+  if (!supabase) return null;
+
+  const { error } = await supabase
+    .from('conversations')
+    .update(update)
+    .eq('id', conversationId);
+
+  if (!error || !Object.prototype.hasOwnProperty.call(update, 'opened_at') || !isMissingOpenedAtColumn(error)) {
+    return error;
+  }
+
+  if (!warnedMissingOpenedAtColumn) {
+    warnedMissingOpenedAtColumn = true;
+    console.warn(
+      '[Conversas] Coluna opened_at ausente; aplicando fallback sem o horário de abertura. ' +
+      'Aplique a migration 20261027000000_add_conversation_opened_at.sql.'
+    );
+  }
+
+  const withoutOpenedAt = { ...update };
+  delete withoutOpenedAt.opened_at;
+
+  const retry = await supabase
+    .from('conversations')
+    .update(withoutOpenedAt)
+    .eq('id', conversationId);
+
+  return retry.error;
 }
 
 async function loadConversationStatusDetails(
-  conversations: Array<{ id: string; unread_count?: number | null }>
+  conversations: Array<{ id: string; unread_count?: number | null; opened_at?: string | null }>
 ): Promise<Record<string, ConversationStatusDetails>> {
   if (!supabase || conversations.length === 0) {
     return {};
@@ -1580,6 +1744,7 @@ async function loadConversationStatusDetails(
           lastCustomerAt: null,
           lastAgentAt: null,
           lastAgentStatus: null,
+          openedAt: null,
         };
       }
       return fallback;
@@ -1625,10 +1790,16 @@ async function loadConversationStatusDetails(
         unreadCount: conversation.unread_count || 0,
         lastCustomerAt: customerAt,
         lastAgentAt: agentAt,
+        openedAt: conversation.opened_at,
       }),
       lastCustomerAt: customerAt === null ? null : new Date(customerAt).toISOString(),
-      lastAgentAt: agentAt === null ? null : new Date(agentAt).toISOString(),
+      // Só devolve a resposta do ciclo atual; respostas antigas não respondem
+      // à mensagem mais recente do cliente.
+      lastAgentAt: resolveEffectiveConversationRepliedAt(agentAt, customerAt),
       lastAgentStatus: lastAgentStatus.get(conversation.id) ?? null,
+      // Só devolve a abertura do ciclo atual. Se ela ocorreu antes da última
+      // mensagem do cliente, o horário fica nulo até o atendente abrir de novo.
+      openedAt: resolveEffectiveConversationOpenedAt(conversation.opened_at, customerAt),
     };
   }
 
@@ -1711,8 +1882,10 @@ app.get('/api/conversations', authMiddleware, async (req: AuthenticatedRequest, 
     .from('conversations')
     .select('*, contact:contacts!conversations_contact_id_fkey(name, phone), assignee:users!conversations_assigned_to_fkey(name)');
 
-  if (req.authRole !== 'admin') {
+  if (req.authRole === 'admin') {
     query = query.eq('company_id', req.authCompanyId);
+  } else {
+    query = query.eq('company_id', req.authCompanyId).eq('assigned_to', req.authUserId);
   }
 
   const { data, error } = await query.order('last_message_at', { ascending: false });
@@ -1736,6 +1909,7 @@ app.get('/api/conversations', authMiddleware, async (req: AuthenticatedRequest, 
       // last_agent_message_status expõe apenas o estado de entrega/leitura,
       // nunca o conteúdo da mensagem.
       last_customer_at: details?.lastCustomerAt ?? null,
+      opened_at: details?.openedAt ?? null,
       last_agent_at: details?.lastAgentAt ?? null,
       last_agent_message_status: details?.lastAgentStatus ?? null,
     };
@@ -1895,15 +2069,9 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req: Authentic
     return res.status(404).json({ error: 'Conversa não encontrada.' });
   }
 
-  if (req.authRole !== 'admin' && conv.company_id !== req.authCompanyId) {
+  if (!canAccessConversation(req.authRole, req.authCompanyId, conv, req.authUserId)) {
     return res.status(403).json({ error: 'Acesso negado a esta conversa.' });
   }
-
-  // Marca como lida
-  await supabase
-    .from('conversations')
-    .update({ unread_count: 0 })
-    .eq('id', req.params.id);
 
   const { data, error } = await supabase
     .from('messages')
@@ -1913,6 +2081,10 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req: Authentic
 
   if (error) {
     return res.status(500).json({ error: 'Erro ao obter mensagens.' });
+  }
+
+  if (!canAccessConversation(req.authRole, req.authCompanyId, conv, req.authUserId)) {
+    return res.status(403).json({ error: 'Acesso negado a esta conversa.' });
   }
 
   res.json((data || []).map((message: any) => ({
@@ -1964,16 +2136,25 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
   }
 
   if (!isInternal) {
-    await supabase
-      .from('conversations')
-      .update({
-        last_message: content.trim(),
-        last_message_at: newMsg.created_at || new Date().toISOString(),
-        // Uma resposta do atendente atende/limpa as mensagens pendentes.
-        // O estado visual é recalculado a partir das mensagens persistidas.
-        unread_count: 0,
-      })
-      .eq('id', conv.id);
+    const conversationUpdate: Record<string, unknown> = {
+      last_message: content.trim(),
+      last_message_at: newMsg.created_at || new Date().toISOString(),
+      // Uma resposta do atendente atende/limpa as mensagens pendentes.
+      // O estado visual é recalculado a partir das mensagens persistidas.
+      unread_count: 0,
+    };
+
+    // Resposta a mensagem pendente também registra a abertura do ciclo.
+    // Em conversas antigas sem opened_at, a primeira resposta vira a
+    // referência disponível; não há como reconstruir a abertura passada.
+    if ((conv.unread_count || 0) > 0 || !conv.opened_at) {
+      conversationUpdate.opened_at = newMsg.created_at || new Date().toISOString();
+    }
+
+    const conversationUpdateError = await updateConversationState(conv.id, conversationUpdate);
+    if (conversationUpdateError) {
+      console.error('[Conversas] Erro ao atualizar conversa após resposta:', conversationUpdateError.message);
+    }
 
     // Se houver credencial oficial conectada, despacha para a Meta e só
     // considera enviada quando a API responde 2xx (com o ID real da Meta).
@@ -2048,7 +2229,7 @@ app.patch('/api/conversations/:id/status', authMiddleware, async (req: Authentic
     return res.status(404).json({ error: 'Conversa não encontrada.' });
   }
 
-  if (req.authRole !== 'admin' && conv.company_id !== req.authCompanyId) {
+  if (!canAccessConversation(req.authRole, req.authCompanyId, conv, req.authUserId)) {
     return res.status(403).json({ error: 'Acesso negado a esta conversa.' });
   }
 
@@ -2132,6 +2313,10 @@ app.get('/api/dashboard/attendant-stats', authMiddleware, async (req: Authentica
     contact_phone: conv.contact?.phone || '',
     assigned_name: conv.assignee?.name || null,
     visual_status: statusDetails[conv.id]?.status || 'awaiting_reply',
+    last_customer_at: statusDetails[conv.id]?.lastCustomerAt ?? null,
+    opened_at: statusDetails[conv.id]?.openedAt ?? null,
+    last_agent_at: statusDetails[conv.id]?.lastAgentAt ?? null,
+    last_agent_message_status: statusDetails[conv.id]?.lastAgentStatus ?? null,
   }));
 
   // Filtra conversas atribuídas especificamente ao atendente autenticado

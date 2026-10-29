@@ -1,12 +1,12 @@
 -- ============================================================================
--- REOBOTE SISTEMA ATENDIMENTO
+-- REOBOTE SISTEMAS — ATENDIMENTO
 -- Validação pós-instalação (SOMENTE LEITURA)
 --
 -- Execute depois da migration no projeto Supabase NOVO.
 -- Este arquivo não cria, altera nem apaga dados.
 -- ============================================================================
 
--- 1. Tabelas esperadas (devem existir 8).
+-- 1. Tabelas esperadas (devem existir 11).
 select table_name
 from information_schema.tables
 where table_schema = 'public'
@@ -18,7 +18,10 @@ where table_schema = 'public'
     'conversations',
     'messages',
     'automations',
-    'quick_replies'
+    'quick_replies',
+    'emergency_ai_configs',
+    'emergency_ai_audit_logs',
+    'emergency_ai_events'
   )
 order by table_name;
 
@@ -27,14 +30,17 @@ select table_name, column_name, data_type, is_nullable, column_default
 from information_schema.columns
 where table_schema = 'public'
   and (
-    (table_name = 'conversations' and column_name in ('last_message', 'last_message_at', 'updated_at', 'unread_count', 'assigned_to', 'status'))
+    (table_name = 'conversations' and column_name in ('last_message', 'last_message_at', 'updated_at', 'unread_count', 'opened_at', 'assigned_to', 'status'))
     or (table_name = 'whatsapp_configs' and column_name in ('access_token', 'verify_token', 'verified_name', 'quality_rating', 'is_verified', 'company_id'))
     or (table_name = 'users' and column_name in ('id', 'company_id', 'email', 'role', 'status'))
     or (table_name = 'messages' and column_name in ('conversation_id', 'sender_type', 'sender_id', 'content', 'status', 'whatsapp_message_id'))
+    or (table_name = 'emergency_ai_configs' and column_name in ('id', 'company_id', 'enabled', 'provider', 'model', 'integration_status', 'last_changed_by', 'last_changed_by_name', 'last_changed_at'))
+    or (table_name = 'emergency_ai_audit_logs' and column_name in ('id', 'config_id', 'action', 'actor_id', 'actor_name', 'previous_enabled', 'new_enabled', 'result', 'reason', 'integration_status', 'created_at'))
+    or (table_name = 'emergency_ai_events' and column_name in ('id', 'config_id', 'conversation_id', 'inbound_message_id', 'outbound_message_id', 'event_type', 'outcome', 'input_tokens', 'output_tokens', 'total_tokens', 'idempotency_key', 'created_at'))
   )
 order by table_name, column_name;
 
--- 3. RLS habilitado (relrowsecurity deve ser true nas 8 tabelas).
+-- 3. RLS habilitado (relrowsecurity deve ser true nas 11 tabelas).
 select c.relname as table_name,
        c.relrowsecurity as rls_enabled,
        c.relforcerowsecurity as rls_forced
@@ -49,7 +55,10 @@ where n.nspname = 'public'
     'conversations',
     'messages',
     'automations',
-    'quick_replies'
+    'quick_replies',
+    'emergency_ai_configs',
+    'emergency_ai_audit_logs',
+    'emergency_ai_events'
   )
 order by c.relname;
 
@@ -65,7 +74,10 @@ where schemaname = 'public'
     'conversations',
     'messages',
     'automations',
-    'quick_replies'
+    'quick_replies',
+    'emergency_ai_configs',
+    'emergency_ai_audit_logs',
+    'emergency_ai_events'
   )
 order by tablename, policyname;
 
@@ -84,7 +96,8 @@ where n.nspname = 'public'
     'is_admin',
     'set_updated_at',
     'enforce_conversation_company',
-    'enforce_message_company'
+    'enforce_message_company',
+    'set_emergency_ai_enabled'
   )
 order by p.proname;
 
@@ -103,7 +116,8 @@ where trigger_schema = 'public'
     'conversations',
     'messages',
     'automations',
-    'quick_replies'
+    'quick_replies',
+    'emergency_ai_configs'
   )
 order by event_object_table, trigger_name, event_manipulation;
 
@@ -119,7 +133,10 @@ where schemaname = 'public'
     'conversations',
     'messages',
     'automations',
-    'quick_replies'
+    'quick_replies',
+    'emergency_ai_configs',
+    'emergency_ai_audit_logs',
+    'emergency_ai_events'
   )
 order by tablename, indexname;
 
@@ -153,7 +170,10 @@ where table_schema = 'public'
     'conversations',
     'messages',
     'automations',
-    'quick_replies'
+    'quick_replies',
+    'emergency_ai_configs',
+    'emergency_ai_audit_logs',
+    'emergency_ai_events'
   )
   and grantee in ('anon', 'authenticated', 'service_role')
 order by table_name, grantee, privilege_type;
@@ -174,6 +194,12 @@ union all
 select 'automations', count(*) from public.automations
 union all
 select 'quick_replies', count(*) from public.quick_replies
+union all
+select 'emergency_ai_configs', count(*) from public.emergency_ai_configs
+union all
+select 'emergency_ai_audit_logs', count(*) from public.emergency_ai_audit_logs
+union all
+select 'emergency_ai_events', count(*) from public.emergency_ai_events
 order by table_name;
 
 -- 11. Nenhum usuário de demonstração/teste deve existir.

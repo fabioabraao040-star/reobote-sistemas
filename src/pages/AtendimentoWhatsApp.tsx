@@ -5,6 +5,7 @@ import {
   ConversationStatusIndicator,
   ConversationStatusLegend,
 } from '../components/ConversationStatusIndicator';
+import { ConversationEventTimes } from '../components/ConversationEventTimes';
 import {
   normalizeConversationVisualStatus,
   resolveConversationVisualStatus,
@@ -19,6 +20,9 @@ interface Conversation {
   status: 'open' | 'in_progress' | 'closed';
   lastMessage: string;
   lastMessageAt: string;
+  lastCustomerAt?: string | null;
+  openedAt?: string | null;
+  lastAgentAt?: string | null;
   unreadCount: number;
   visualStatus: ConversationVisualStatus;
 }
@@ -84,7 +88,14 @@ export default function AtendimentoWhatsApp() {
     setConversations((prev) =>
       prev.map((c: Conversation) =>
         c.id === selectedConvId && c.unreadCount > 0
-          ? { ...c, unreadCount: 0, visualStatus: 'awaiting_reply' as ConversationVisualStatus }
+          ? {
+              ...c,
+              unreadCount: 0,
+              openedAt: new Date().toISOString(),
+              // A resposta anterior não responde à mensagem que acabou de chegar.
+              lastAgentAt: null,
+              visualStatus: 'awaiting_reply' as ConversationVisualStatus,
+            }
           : c
       )
     );
@@ -206,22 +217,32 @@ export default function AtendimentoWhatsApp() {
       setMessages((prev) => [...prev, sent]);
 
       if (isAgentReply) {
+        const sentAt = sent.createdAt || new Date().toISOString();
+        const lastCustomerAt = messages.filter((m) => m.senderType === 'customer').pop()?.createdAt ?? null;
+
         setConversations((prev) =>
-          prev.map((c: Conversation) =>
-            c.id === selectedConvId
-              ? {
-                  ...c,
-                  unreadCount: 0,
-                  // Verde só se houver mensagem do cliente respondida por ela;
-                  // a lista é recalculada pelo servidor logo em seguida.
-                  visualStatus: resolveConversationVisualStatus({
-                    unreadCount: 0,
-                    lastCustomerAt: messages.filter((m) => m.senderType === 'customer').pop()?.createdAt ?? null,
-                    lastAgentAt: sent.createdAt ?? null,
-                  }),
-                }
-              : c
-          )
+          prev.map((c: Conversation) => {
+            if (c.id !== selectedConvId) return c;
+
+            // Se havia mensagem pendente, a resposta também registra a
+            // abertura; se a conversa já estava aberta, preserva esse horário.
+            const openedAt = c.unreadCount > 0 || !c.openedAt ? sentAt : c.openedAt;
+
+            return {
+              ...c,
+              unreadCount: 0,
+              openedAt,
+              lastAgentAt: sentAt,
+              // Verde só se houver mensagem do cliente respondida por ela;
+              // a lista é recalculada pelo servidor logo em seguida.
+              visualStatus: resolveConversationVisualStatus({
+                unreadCount: 0,
+                lastCustomerAt,
+                lastAgentAt: sentAt,
+                openedAt,
+              }),
+            };
+          })
         );
       }
 
@@ -418,6 +439,12 @@ export default function AtendimentoWhatsApp() {
                       className="hidden sm:inline-flex"
                     />
                   </div>
+                  <ConversationEventTimes
+                    receivedAt={selectedConversation?.lastCustomerAt}
+                    openedAt={selectedConversation?.openedAt}
+                    repliedAt={selectedConversation?.lastAgentAt}
+                    className="mt-0.5"
+                  />
                 </div>
               </div>
 

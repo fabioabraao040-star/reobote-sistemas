@@ -2,7 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { ConversationStatusIndicator } from './ConversationStatusIndicator';
+import {
+  ConversationStatusIndicator,
+  ConversationStatusLegend,
+} from './ConversationStatusIndicator';
+import { ConversationEventTimes } from './ConversationEventTimes';
+import { EmergencyAICard } from './EmergencyAICard';
 import { PieChartDeAtendimentos } from './PieChartDeAtendimentos';
 
 interface StatCardProps {
@@ -96,6 +101,7 @@ export default function Dashboard() {
   const closedCount = allConversations.filter((c) => c.status === 'closed').length;
   const unreadTotal = allConversations.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
   const attendantUnreadCount = attendantStats.conversas.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
+  const recentConversations = allConversations.slice(0, 5);
 
   const badgeClassT = isAdmin ? 'bg-[#EFA339]/10 text-[#F5C26B] border border-[#EFA339]/30' : 'bg-[#263744] text-[#D0B783] border border-[#D0B783]/30';
   const badgeLabelT = isAdmin ? 'Painel Administrativo' : 'Painel do Atendente';
@@ -160,9 +166,41 @@ export default function Dashboard() {
                     <h2 className="font-headline-md text-base font-semibold text-[#E1E8EC]">Monitoramento Geral de Atendimentos</h2>
                   </div>
                 </div>
-                <div className="p-4 text-center">
-                  <p className="text-sm text-[#B4C5CE] mb-4">Acesse a área de atendimento para visualizar e gerenciar todas as conversas da empresa.</p>
-                  <Link to="/atendimento" className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs">
+                <div className="p-4">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-sm text-[#B4C5CE]">Últimas conversas</p>
+                    <ConversationStatusLegend />
+                  </div>
+                  {recentConversations.length === 0 ? (
+                    <p className="text-xs text-[#B4C5CE] text-center py-4">Nenhuma conversa registrada.</p>
+                  ) : (
+                    <div className="divide-y divide-[#526673]">
+                      {recentConversations.map((conv) => (
+                        <Link
+                          key={conv.id}
+                          to={`/atendimento?id=${conv.id}`}
+                          className="py-2 flex items-center justify-between gap-3 group"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <ConversationStatusIndicator status={conv.visualStatus} unreadCount={conv.unreadCount} />
+                              <span className="text-xs font-semibold text-[#E1E8EC] truncate group-hover:text-[#D0B783]">
+                                {conv.contactName}
+                              </span>
+                            </div>
+                            <ConversationEventTimes
+                              receivedAt={conv.lastCustomerAt}
+                              openedAt={conv.openedAt}
+                              repliedAt={conv.lastAgentAt}
+                              className="mt-1"
+                            />
+                          </div>
+                          <span className="material-symbols-outlined text-[16px] text-[#D0B783] flex-shrink-0">chevron_right</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                  <Link to="/atendimento" className="mt-3 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#527D91] text-white text-xs font-semibold hover:brightness-95 transition-all shadow-xs">
                     <span className="material-symbols-outlined text-[16px]">chat_bubble_outline</span>
                     <span>Ir para Atendimento WhatsApp</span>
                   </Link>
@@ -198,6 +236,9 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
+            <div className="lg:col-span-1">
+              <EmergencyAICard />
+            </div>
           </div>
         </>
       ) : (
@@ -206,9 +247,12 @@ export default function Dashboard() {
             <div className="lg:col-span-2 space-y-4">
               <div className="bg-[#344956] rounded-xl border border-[#526673] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.18)] overflow-hidden">
                 <div className="p-4 border-b border-[#526673] flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[#E1E8EC] text-[20px]">support_agent</span>
-                    <h2 className="font-headline-md text-base font-semibold text-[#E1E8EC]">Minhas Conversas Atribuídas ({attendantStats.conversas.length})</h2>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[#E1E8EC] text-[20px]">support_agent</span>
+                      <h2 className="font-headline-md text-base font-semibold text-[#E1E8EC]">Minhas Conversas Atribuídas ({attendantStats.conversas.length})</h2>
+                    </div>
+                    <ConversationStatusLegend className="mt-1.5 ml-7" />
                   </div>
                   <Link to="/atendimento" className="text-xs font-semibold text-[#D0B783] hover:underline flex items-center gap-1">
                     <span>Abrir Chat WhatsApp</span>
@@ -242,6 +286,12 @@ export default function Dashboard() {
                               <span className="text-[11px] text-[#B4C5CE]">{item.contactPhone}</span>
                             </div>
                             <p className="text-xs text-[#B4C5CE] truncate mt-0.5">{item.lastMessage || 'Sem mensagens anteriores.'}</p>
+                            <ConversationEventTimes
+                              receivedAt={item.lastCustomerAt}
+                              openedAt={item.openedAt}
+                              repliedAt={item.lastAgentAt}
+                              className="mt-1.5"
+                            />
                           </div>
                         </div>
                         <div className="flex items-center gap-2.5 flex-shrink-0 justify-between sm:justify-end">

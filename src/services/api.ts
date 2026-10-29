@@ -153,6 +153,47 @@ export const api = {
     return parseJson(res);
   },
 
+  // IA de Emergência (somente ADM no backend)
+  async getEmergencyAIStatus() {
+    const res = await fetch('/api/emergency-ai', { headers: getAuthHeaders(), cache: 'no-store' });
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || 'Erro ao consultar a IA de Emergência.');
+    return data;
+  },
+
+  async activateEmergencyAI(reason?: string) {
+    const res = await fetch('/api/emergency-ai/activate', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+    });
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || 'Erro ao ativar a IA de Emergência.');
+    return data;
+  },
+
+  async deactivateEmergencyAI(reason?: string) {
+    const res = await fetch('/api/emergency-ai/deactivate', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+    });
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || 'Erro ao desativar a IA de Emergência.');
+    return data;
+  },
+
+  async getEmergencyAIHistory(limit = 20) {
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 20)));
+    const res = await fetch(`/api/emergency-ai/history?limit=${safeLimit}`, {
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    });
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || 'Erro ao consultar o histórico da IA de Emergência.');
+    return data;
+  },
+
   // Contatos
   async getContacts() {
     const res = await fetch('/api/contacts', { headers: getAuthHeaders() });

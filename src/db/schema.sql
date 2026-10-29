@@ -1,5 +1,5 @@
 -- ============================================================================
--- REOBOTE SISTEMA ATENDIMENTO — SCHEMA SUPABASE POSTGRESQL & POLÍTICAS RLS
+-- REOBOTE SISTEMAS — ATENDIMENTO — SCHEMA SUPABASE POSTGRESQL & POLÍTICAS RLS
 -- ============================================================================
 
 -- 1. Habilitar extensões
@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS public.conversations (
     status VARCHAR(50) DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'closed')),
     last_message_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     unread_count INTEGER DEFAULT 0,
+    opened_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

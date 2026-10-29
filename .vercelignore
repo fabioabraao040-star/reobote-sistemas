@@ -1,0 +1,11 @@
+# Segredos locais: nunca enviar ao build da Vercel
+.env
+.env.*
+!.env.example
+
+# Artefatos e backups locais
+node_modules
+dist
+backups
+*.log
+.vercel
