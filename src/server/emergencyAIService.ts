@@ -29,8 +29,8 @@ export interface EmergencyAIGenerationInput {
 }
 
 export type EmergencyAIGenerationResult =
-  | { text: string; error: null; model: string }
-  | { text: null; error: string; model: string | null };
+  | { text: string; error: null; model: string; errorCode: null }
+  | { text: null; error: string; model: string | null; errorCode: string };
 
 /**
  * Injetável para testes: nunca chama a API real durante a suíte automatizada.
@@ -80,6 +80,54 @@ function clampTimeout(value: number | undefined): number {
     return EMERGENCY_AI_DEFAULT_TIMEOUT_MS;
   }
   return Math.min(Math.max(Math.trunc(value), 1000), 30000);
+}
+
+// Códigos seguros para log/evento. O provedor pode devolver uma mensagem
+// extensa (inclusive detalhes internos); apenas o motivo conhecido é extraído.
+const SAFE_PROVIDER_ERROR_CODES = new Set([
+  'API_KEY_INVALID',
+  'PERMISSION_DENIED',
+  'RESOURCE_EXHAUSTED',
+  'QUOTA_EXCEEDED',
+  'INVALID_ARGUMENT',
+  'UNAUTHENTICATED',
+  'NOT_FOUND',
+  'MODEL_NOT_FOUND',
+  'UNAVAILABLE',
+  'INTERNAL',
+  'DEADLINE_EXCEEDED',
+  'FAILED_PRECONDITION',
+]);
+
+function extractSafeProviderErrorCode(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'provider_error';
+  }
+
+  if (error.message === 'timeout') {
+    return 'timeout';
+  }
+  if (error.message === 'AI provider not configured') {
+    return 'provider_not_configured';
+  }
+
+  const reason =
+    error.message.match(/"reason"\s*:\s*"([A-Z0-9_]+)"/)?.[1] ??
+    error.message.match(
+      /\b(API_KEY_INVALID|PERMISSION_DENIED|RESOURCE_EXHAUSTED|QUOTA_EXCEEDED|INVALID_ARGUMENT|UNAUTHENTICATED|NOT_FOUND|MODEL_NOT_FOUND|UNAVAILABLE|INTERNAL|DEADLINE_EXCEEDED|FAILED_PRECONDITION)\b/
+    )?.[1] ??
+    null;
+
+  if (reason && SAFE_PROVIDER_ERROR_CODES.has(reason)) {
+    return reason;
+  }
+
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === 'number' && Number.isFinite(status)) {
+    return `provider_http_${Math.trunc(status)}`;
+  }
+
+  return error.name === 'ApiError' ? 'provider_api_error' : 'provider_error';
 }
 
 export function createEmergencyAIService(options: {
@@ -219,22 +267,42 @@ export function createEmergencyAIService(options: {
       const conversationId =
         typeof input.conversationId === 'string' ? input.conversationId.trim() : '';
       if (!conversationId) {
-        return { text: null, error: 'Conversa inválida.', model: null };
+        return {
+          text: null,
+          error: 'Conversa inválida.',
+          model: null,
+          errorCode: 'invalid_conversation',
+        };
       }
 
       const customerMessage =
         typeof input.customerMessage === 'string' ? input.customerMessage.trim() : '';
       if (!customerMessage) {
-        return { text: null, error: 'Mensagem inválida.', model: null };
+        return {
+          text: null,
+          error: 'Mensagem inválida.',
+          model: null,
+          errorCode: 'invalid_message',
+        };
       }
       if (customerMessage.length > EMERGENCY_AI_MAX_INPUT_CHARS) {
-        return { text: null, error: 'Mensagem acima do limite permitido.', model: null };
+        return {
+          text: null,
+          error: 'Mensagem acima do limite permitido.',
+          model: null,
+          errorCode: 'input_too_long',
+        };
       }
 
       // Sem chave no servidor e sem gerador injetado (testes), a IA não pode
       // responder. O webhook segue para atendimento humano.
       if (!geminiApiKey && !options.generateContent) {
-        return { text: null, error: 'Provedor de IA não configurado.', model: null };
+        return {
+          text: null,
+          error: 'Provedor de IA não configurado.',
+          model: null,
+          errorCode: 'provider_not_configured',
+        };
       }
 
       // O modelo persistido é apenas um rótulo de configuração; a credencial
@@ -270,18 +338,27 @@ export function createEmergencyAIService(options: {
 
         const trimmed = typeof text === 'string' ? text.trim() : '';
         if (!trimmed) {
-          return { text: null, error: 'Resposta vazia do provedor.', model };
+          return {
+            text: null,
+            error: 'Resposta vazia do provedor.',
+            model,
+            errorCode: 'empty_response',
+          };
         }
 
         // Limite de saída defensivo, além de maxOutputTokens.
-        return { text: trimmed.slice(0, 4000), error: null, model };
+        return { text: trimmed.slice(0, 4000), error: null, model, errorCode: null };
       } catch (error) {
         // Nunca registra prompt, mensagem do cliente, chave ou stack trace.
-        logger.error(
-          '[IA de Emergência] Falha ao gerar resposta:',
-          error instanceof Error ? error.name : 'erro desconhecido'
-        );
-        return { text: null, error: 'Erro ao gerar resposta de IA.', model };
+        // Apenas o código seguro do motivo é exposto no log e no evento.
+        const errorCode = extractSafeProviderErrorCode(error);
+        logger.error('[IA de Emergência] Falha ao gerar resposta:', errorCode);
+        return {
+          text: null,
+          error: 'Erro ao gerar resposta de IA.',
+          model,
+          errorCode,
+        };
       } finally {
         if (timer) {
           clearTimeout(timer);

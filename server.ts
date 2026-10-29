@@ -890,6 +890,32 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
                 );
                 return 'unavailable';
               },
+              async recordGenerationFailure({
+                companyId: eventCompanyId,
+                conversationId: eventConversationId,
+                inboundMessageId,
+                errorCode,
+                model,
+              }) {
+                const { error } = await db.from('emergency_ai_events').insert({
+                  company_id: eventCompanyId,
+                  conversation_id: eventConversationId,
+                  inbound_message_id: inboundRowId,
+                  event_type: 'error',
+                  outcome: 'failed',
+                  provider: 'gemini',
+                  model: model ? model.slice(0, 150) : null,
+                  error_code: errorCode.slice(0, 100),
+                  idempotency_key: `emergency-ai:error:${inboundMessageId}`.slice(0, 255),
+                });
+                if (error && error.code !== '23505') {
+                  // Nunca registra conteúdo, prompt, chave ou stack trace.
+                  console.warn(
+                    '[IA de Emergência] Falha ao registrar evento de erro:',
+                    error.code || 'erro'
+                  );
+                }
+              },
               async getContactPhone(contactId) {
                 const { data } = await db
                   .from('contacts')

@@ -30,6 +30,13 @@ export interface EmergencyAIWebhookAdapter {
     conversationId: string;
     inboundMessageId: string;
   }): Promise<EmergencyAIClaimResult>;
+  recordGenerationFailure(params: {
+    companyId: string;
+    conversationId: string;
+    inboundMessageId: string;
+    errorCode: string;
+    model: string | null;
+  }): Promise<void>;
   getContactPhone(contactId: string): Promise<string | null>;
   insertAiMessage(params: { conversationId: string; content: string }): Promise<string | null>;
   setAiMessageWhatsAppId(messageId: string, whatsappMessageId: string): Promise<void>;
@@ -165,10 +172,31 @@ export async function processEmergencyAIInbound(params: {
 
     if (!generation.text) {
       // Falha do provedor não derruba o webhook: o atendimento humano segue.
+      // O código seguro (ex.: API_KEY_INVALID) é registrado sem prompt,
+      // mensagem do cliente, credencial ou stack trace.
+      const errorCode = generation.errorCode || 'generation_failed';
       logger.error(
-        '[IA de Emergência] Geração não produziu resposta; seguindo para atendimento humano.'
+        '[IA de Emergência] Geração não produziu resposta; seguindo para atendimento humano.',
+        errorCode
       );
-      return result('generation_failed', generation.error ?? 'empty_response');
+
+      try {
+        await adapter.recordGenerationFailure({
+          companyId: input.companyId,
+          conversationId: input.conversationId,
+          inboundMessageId: input.inboundMessageId,
+          errorCode,
+          model: generation.model,
+        });
+      } catch (eventError) {
+        // A telemetria nunca pode impedir o handoff humano.
+        logger.error(
+          '[IA de Emergência] Falha ao registrar evento de erro:',
+          eventError instanceof Error ? eventError.name : 'erro desconhecido'
+        );
+      }
+
+      return result('generation_failed', errorCode);
     }
 
     // Revalidação obrigatória antes do envio:

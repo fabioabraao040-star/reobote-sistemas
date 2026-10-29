@@ -88,6 +88,13 @@ function makeHarness(options: HarnessOptions = {}) {
     failed: [] as string[],
     touch: [] as Array<{ conversationId: string; content: string; at: string }>,
     claim: [] as string[],
+    failures: [] as Array<{
+      companyId: string;
+      conversationId: string;
+      inboundMessageId: string;
+      errorCode: string;
+      model: string | null;
+    }>,
     conversations: 0,
     logs: [] as unknown[][],
   };
@@ -155,6 +162,9 @@ function makeHarness(options: HarnessOptions = {}) {
       }
       claimed.add(inboundMessageId);
       return 'claimed';
+    },
+    async recordGenerationFailure(input) {
+      calls.failures.push(input);
     },
     async getContactPhone() {
       return options.phone === undefined ? '5511999990000' : options.phone;
@@ -276,13 +286,78 @@ test('erro do Gemini não derruba o webhook e não vaza segredo nos logs', async
   });
 
   assert.equal(result.status, 'generation_failed');
+  assert.equal(result.reason, 'provider_error');
   assert.equal(harness.calls.dispatch.length, 0);
   assert.equal(harness.calls.insertAi.length, 0);
+  assert.equal(harness.calls.failures.length, 1);
+  assert.equal(harness.calls.failures[0].errorCode, 'provider_error');
+  assert.equal(harness.calls.failures[0].conversationId, 'conv-1');
 
   const serializedLogs = JSON.stringify(harness.calls.logs);
   assert.equal(serializedLogs.includes('test-gemini-key'), false);
   assert.equal(serializedLogs.includes('provider down'), false);
   assert.equal(serializedLogs.includes('preciso de ajuda'), false);
+});
+
+test('falha de chave do Gemini registra código seguro sem vazar credencial ou conteúdo', async () => {
+  const harness = makeHarness({
+    enabled: true,
+    generateContent: async () => {
+      const error = new Error(
+        '{"error":{"details":[{"reason":"API_KEY_INVALID"}],"message":"API key not valid. test-gemini-key"},"content":"preciso de ajuda"}'
+      );
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    },
+  });
+
+  const result = await processEmergencyAIInbound({
+    service: harness.service,
+    adapter: harness.adapter,
+    input: makeInput(),
+    logger: {
+      error: (...args: unknown[]) => {
+        harness.calls.logs.push(args);
+      },
+    },
+  });
+
+  assert.equal(result.status, 'generation_failed');
+  assert.equal(result.reason, 'API_KEY_INVALID');
+  assert.equal(harness.calls.failures.length, 1);
+  assert.equal(harness.calls.failures[0].errorCode, 'API_KEY_INVALID');
+  assert.equal(harness.calls.failures[0].model, EMERGENCY_AI_DEFAULT_MODEL);
+
+  const serialized = JSON.stringify({
+    failures: harness.calls.failures,
+    logs: harness.calls.logs,
+  });
+  assert.equal(serialized.includes('test-gemini-key'), false);
+  assert.equal(serialized.includes('preciso de ajuda'), false);
+  assert.equal(serialized.includes('API key not valid'), false);
+});
+
+test('falha ao registrar evento de erro não impede o handoff humano', async () => {
+  const harness = makeHarness({
+    enabled: true,
+    generateContent: async () => {
+      throw new Error('provider down');
+    },
+  });
+  harness.adapter.recordGenerationFailure = async () => {
+    throw new Error('event insert failed');
+  };
+
+  const result = await processEmergencyAIInbound({
+    service: harness.service,
+    adapter: harness.adapter,
+    input: makeInput(),
+    logger: quietLogger,
+  });
+
+  assert.equal(result.status, 'generation_failed');
+  assert.equal(result.reason, 'provider_error');
+  assert.equal(harness.calls.dispatch.length, 0);
 });
 
 test('resposta pendente é descartada se a IA for desativada durante a geração', async () => {
@@ -439,9 +514,12 @@ test('chave Gemini ausente mantém a IA sem resposta e não envia nada', async (
   });
 
   assert.equal(result.status, 'generation_failed');
+  assert.equal(result.reason, 'provider_not_configured');
   assert.equal(harness.calls.generate, 0);
   assert.equal(harness.calls.dispatch.length, 0);
   assert.equal(harness.calls.insertAi.length, 0);
+  assert.equal(harness.calls.failures.length, 1);
+  assert.equal(harness.calls.failures[0].errorCode, 'provider_not_configured');
 });
 
 test('falha no envio marca a mensagem como failed e não atualiza a conversa', async () => {
@@ -558,6 +636,7 @@ test('serviço de geração trata resposta vazia, entrada longa e timeout', asyn
   });
   assert.equal(emptyResult.text, null);
   assert.equal(emptyResult.error, 'Resposta vazia do provedor.');
+  assert.equal(emptyResult.errorCode, 'empty_response');
 
   const long = makeHarness();
   const longResult = await long.service.generateResponse({
@@ -567,6 +646,7 @@ test('serviço de geração trata resposta vazia, entrada longa e timeout', asyn
   });
   assert.equal(longResult.text, null);
   assert.equal(longResult.error, 'Mensagem acima do limite permitido.');
+  assert.equal(longResult.errorCode, 'input_too_long');
 
   const timeout = makeHarness({
     generateContent: () => new Promise<string | null>(() => {}),
@@ -579,6 +659,7 @@ test('serviço de geração trata resposta vazia, entrada longa e timeout', asyn
   });
   assert.equal(timeoutResult.text, null);
   assert.equal(timeoutResult.error, 'Erro ao gerar resposta de IA.');
+  assert.equal(timeoutResult.errorCode, 'timeout');
 });
 
 test('serviço usa o modelo persistido e não expõe a chave na resposta', async () => {
@@ -594,6 +675,7 @@ test('serviço usa o modelo persistido e não expõe a chave na resposta', async
 
   assert.equal(result.text, 'Resposta segura.');
   assert.equal(result.model, EMERGENCY_AI_DEFAULT_MODEL);
+  assert.equal(result.errorCode, null);
   assert.equal(JSON.stringify(result).includes('test-gemini-key'), false);
 });
 
@@ -602,6 +684,10 @@ test('webhook oficial da Meta chama o orquestrador da IA e usa o envio existente
   assert.match(SERVER_SOURCE, /isCustomerTextMessage/);
   assert.match(SERVER_SOURCE, /businessPhone/);
   assert.match(SERVER_SOURCE, /emergency_ai_events/);
+  assert.match(SERVER_SOURCE, /recordGenerationFailure/);
+  assert.match(SERVER_SOURCE, /event_type: 'error'/);
+  assert.match(SERVER_SOURCE, /outcome: 'failed'/);
+  assert.match(SERVER_SOURCE, /error_code/);
   assert.match(SERVER_SOURCE, /sender_type: 'system'/);
   assert.match(SERVER_SOURCE, /dispatchWhatsAppText\(dispatchParams\)/);
 
