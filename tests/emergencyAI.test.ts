@@ -161,7 +161,7 @@ test('normaliza aspas e espaços da chave Gemini sem expor o valor', () => {
   assert.equal(
     resolveProviderIntegrationState({
       provider: 'gemini',
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       geminiApiKey: '  "AIza-chave-de-teste"  ',
     }),
     'configured'
@@ -169,7 +169,7 @@ test('normaliza aspas e espaços da chave Gemini sem expor o valor', () => {
   assert.equal(
     resolveProviderIntegrationState({
       provider: 'gemini',
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       geminiApiKey: '  "MY_GEMINI_API_KEY"  ',
     }),
     'unavailable'
@@ -251,7 +251,7 @@ test('serviço normaliza a chave com aspas e não a devolve no status', async ()
     makeConfig({
       enabled: true,
       provider: 'gemini',
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-3.5-flash-lite',
     })
   );
   const service = createEmergencyAIService({
@@ -263,6 +263,56 @@ test('serviço normaliza a chave com aspas e não a devolve no status', async ()
   const status = await service.getStatus();
   assert.equal(status.provider.status, 'configured');
   assert.equal(JSON.stringify(status).includes('AIza-chave-de-teste'), false);
+});
+
+test('usa o novo modelo padrão quando a configuração persistida não define modelo', async () => {
+  const harness = makeStore();
+  harness.setConfig(makeConfig({ enabled: true, provider: 'gemini', model: null }));
+  let usedModel = '';
+  const service = createEmergencyAIService({
+    store: harness.store,
+    geminiApiKey: 'valid-key',
+    logger: { error() {} },
+    generateContent: async ({ model }) => {
+      usedModel = model;
+      return 'Resposta de teste.';
+    },
+  });
+
+  const result = await service.generateResponse({
+    conversationId: 'conv-1',
+    customerMessage: 'Olá',
+    companyId: 'company-1',
+  });
+
+  assert.equal(result.model, 'gemini-3.5-flash-lite');
+  assert.equal(usedModel, 'gemini-3.5-flash-lite');
+});
+
+test('modelo persistido continua tendo precedência sobre o modelo padrão', async () => {
+  const harness = makeStore();
+  harness.setConfig(
+    makeConfig({ enabled: true, provider: 'gemini', model: 'modelo-persistido' })
+  );
+  let usedModel = '';
+  const service = createEmergencyAIService({
+    store: harness.store,
+    geminiApiKey: 'valid-key',
+    logger: { error() {} },
+    generateContent: async ({ model }) => {
+      usedModel = model;
+      return 'Resposta de teste.';
+    },
+  });
+
+  const result = await service.generateResponse({
+    conversationId: 'conv-1',
+    customerMessage: 'Olá',
+    companyId: 'company-1',
+  });
+
+  assert.equal(result.model, 'modelo-persistido');
+  assert.equal(usedModel, 'modelo-persistido');
 });
 
 test('serviço ativa e desativa com motivo e responsável auditáveis', async () => {

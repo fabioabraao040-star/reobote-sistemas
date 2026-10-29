@@ -86,7 +86,7 @@ export const EMERGENCY_AI_HISTORY_MAX_LIMIT = 100;
 // Provedor/modelo efetivos quando a IA está ativa e a configuração persistida
 // ainda não fixou um modelo. O backend usa exatamente estes valores.
 export const EMERGENCY_AI_DEFAULT_PROVIDER = 'gemini';
-export const EMERGENCY_AI_DEFAULT_MODEL = 'gemini-2.5-flash-lite';
+export const EMERGENCY_AI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 
 const GEMINI_PLACEHOLDER_KEY = 'MY_GEMINI_API_KEY';
 
