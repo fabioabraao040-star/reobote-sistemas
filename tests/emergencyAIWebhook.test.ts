@@ -88,6 +88,13 @@ function makeHarness(options: HarnessOptions = {}) {
     failed: [] as string[],
     touch: [] as Array<{ conversationId: string; content: string; at: string }>,
     claim: [] as string[],
+    responses: [] as Array<{
+      companyId: string;
+      conversationId: string;
+      inboundMessageId: string;
+      outboundMessageId: string | null;
+      model: string | null;
+    }>,
     failures: [] as Array<{
       companyId: string;
       conversationId: string;
@@ -165,6 +172,9 @@ function makeHarness(options: HarnessOptions = {}) {
     },
     async recordGenerationFailure(input) {
       calls.failures.push(input);
+    },
+    async recordAIResponse(input) {
+      calls.responses.push(input);
     },
     async getContactPhone() {
       return options.phone === undefined ? '5511999990000' : options.phone;
@@ -261,9 +271,31 @@ test('IA ativada processa mensagem elegível, registra histórico e envia', asyn
   assert.equal(harness.calls.dispatch.length, 1);
   assert.equal(harness.calls.dispatch[0].to, '5511999990000');
   assert.equal(harness.calls.dispatch[0].body, 'Resposta automática de teste.');
+  assert.equal(harness.calls.responses.length, 1);
+  assert.equal(harness.calls.responses[0].companyId, 'company-1');
+  assert.equal(harness.calls.responses[0].conversationId, 'conv-1');
+  assert.equal(harness.calls.responses[0].inboundMessageId, 'wamid-in-1');
+  assert.equal(harness.calls.responses[0].model, EMERGENCY_AI_DEFAULT_MODEL);
   assert.equal(harness.calls.touch.length, 1);
   assert.equal(harness.calls.touch[0].at, '2026-10-28T12:00:05.000Z');
   assert.equal(harness.calls.failed.length, 0);
+});
+
+test('falha ao registrar sucesso não desfaz envio confirmado', async () => {
+  const harness = makeHarness({ enabled: true });
+  harness.adapter.recordAIResponse = async () => {
+    throw new Error('event insert failed');
+  };
+
+  const result = await processEmergencyAIInbound({
+    service: harness.service,
+    adapter: harness.adapter,
+    input: makeInput(),
+    logger: quietLogger,
+  });
+
+  assert.equal(result.status, 'sent');
+  assert.equal(harness.calls.dispatch.length, 1);
 });
 
 test('erro do Gemini não derruba o webhook e não vaza segredo nos logs', async () => {

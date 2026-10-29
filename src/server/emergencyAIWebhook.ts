@@ -37,6 +37,13 @@ export interface EmergencyAIWebhookAdapter {
     errorCode: string;
     model: string | null;
   }): Promise<void>;
+  recordAIResponse(params: {
+    companyId: string;
+    conversationId: string;
+    inboundMessageId: string;
+    outboundMessageId: string | null;
+    model: string | null;
+  }): Promise<void>;
   getContactPhone(contactId: string): Promise<string | null>;
   insertAiMessage(params: { conversationId: string; content: string }): Promise<string | null>;
   setAiMessageWhatsAppId(messageId: string, whatsappMessageId: string): Promise<void>;
@@ -257,6 +264,21 @@ export async function processEmergencyAIInbound(params: {
 
     if (dispatch.messageId) {
       await adapter.setAiMessageWhatsAppId(messageId, dispatch.messageId);
+    }
+
+    try {
+      await adapter.recordAIResponse({
+        companyId: input.companyId,
+        conversationId: input.conversationId,
+        inboundMessageId: input.inboundMessageId,
+        outboundMessageId: dispatch.messageId,
+        model: generation.model,
+      });
+    } catch (eventError) {
+      logger.error(
+        '[IA de Emergência] Falha ao registrar sucesso da resposta:',
+        eventError instanceof Error ? eventError.name : 'erro desconhecido'
+      );
     }
 
     const at = (params.now ? params.now() : new Date()).toISOString();
