@@ -28,23 +28,28 @@ export interface EmergencyAIWebhookAdapter {
   claimInboundEvent(params: {
     companyId: string;
     conversationId: string;
-    inboundMessageId: string;
+    /** WAMID externo da Meta. Usado apenas em idempotency_key (texto). */
+    inboundExternalId: string;
   }): Promise<EmergencyAIClaimResult>;
   recordGenerationFailure(params: {
     companyId: string;
     conversationId: string;
-    inboundMessageId: string;
+    /** WAMID externo da Meta. Usado apenas em idempotency_key (texto). */
+    inboundExternalId: string;
     errorCode: string;
     model: string | null;
   }): Promise<void>;
   recordAIResponse(params: {
     companyId: string;
     conversationId: string;
-    inboundMessageId: string;
-    outboundMessageId: string | null;
+    /** WAMID externo da Meta. Usado apenas em idempotency_key (texto). */
+    inboundExternalId: string;
+    /** UUID interno de messages.id. Único valor aceito em outbound_message_id. */
+    outboundMessageUuid: string | null;
     model: string | null;
   }): Promise<void>;
   getContactPhone(contactId: string): Promise<string | null>;
+  /** Deve devolver o UUID interno de messages.id, nunca o WAMID externo. */
   insertAiMessage(params: { conversationId: string; content: string }): Promise<string | null>;
   setAiMessageWhatsAppId(messageId: string, whatsappMessageId: string): Promise<void>;
   markAiMessageFailed(messageId: string): Promise<void>;
@@ -67,7 +72,8 @@ export interface EmergencyAIInboundInput {
   companyId: string;
   contactId: string;
   customerMessage: string;
-  inboundMessageId: string | null;
+  /** WAMID externo da Meta. Não é UUID e não deve ser gravado em colunas UUID. */
+  inboundExternalId: string | null;
   receivedAt: string;
   isCustomerTextMessage: boolean;
 }
@@ -128,7 +134,7 @@ export async function processEmergencyAIInbound(params: {
     return result('skipped_ineligible', 'not_customer_text');
   }
 
-  if (!input.inboundMessageId) {
+  if (!input.inboundExternalId) {
     return result('skipped_ineligible', 'missing_message_id');
   }
 
@@ -154,7 +160,7 @@ export async function processEmergencyAIInbound(params: {
     const claim = await adapter.claimInboundEvent({
       companyId: input.companyId,
       conversationId: input.conversationId,
-      inboundMessageId: input.inboundMessageId,
+      inboundExternalId: input.inboundExternalId,
     });
     if (claim === 'duplicate') {
       return result('duplicate', 'duplicate_event');
@@ -191,7 +197,7 @@ export async function processEmergencyAIInbound(params: {
         await adapter.recordGenerationFailure({
           companyId: input.companyId,
           conversationId: input.conversationId,
-          inboundMessageId: input.inboundMessageId,
+          inboundExternalId: input.inboundExternalId,
           errorCode,
           model: generation.model,
         });
@@ -270,8 +276,10 @@ export async function processEmergencyAIInbound(params: {
       await adapter.recordAIResponse({
         companyId: input.companyId,
         conversationId: input.conversationId,
-        inboundMessageId: input.inboundMessageId,
-        outboundMessageId: dispatch.messageId,
+        // WAMID externo: alimenta apenas a idempotency_key.
+        inboundExternalId: input.inboundExternalId,
+        // UUID interno de messages.id: nunca trocar pelo WAMID.
+        outboundMessageUuid: messageId,
         model: generation.model,
       });
     } catch (eventError) {

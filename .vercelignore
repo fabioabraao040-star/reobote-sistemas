@@ -9,3 +9,6 @@ dist
 backups
 *.log
 .vercel
+
+# Backup local de revisao
+revisao-ia-emergencia.tar.gz

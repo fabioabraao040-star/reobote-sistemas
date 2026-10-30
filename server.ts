@@ -628,6 +628,15 @@ app.get('/api/webhook/whatsapp', async (req, res) => {
 // quando a configuração persistida está enabled = true, a conversa é elegível e
 // não há atendente humano responsável. Qualquer erro de leitura ou geração
 // mantém o atendimento humano normal.
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// `emergency_ai_events.outbound_message_id` é UUID e referencia messages.id.
+// O WAMID externo da Meta (ex.: "wamid.HBg...") nunca pode entrar nessa coluna.
+function toInternalMessageUuid(value: string | null): string | null {
+  return typeof value === 'string' && UUID_PATTERN.test(value) ? value : null;
+}
+
 app.post('/api/webhook/whatsapp', async (req, res) => {
   const signature = req.headers['x-hub-signature-256'];
 
@@ -871,14 +880,14 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
                   .limit(1);
                 return Array.isArray(data) && data.length > 0;
               },
-              async claimInboundEvent({ companyId: eventCompanyId, conversationId: eventConversationId, inboundMessageId }) {
+              async claimInboundEvent({ companyId: eventCompanyId, conversationId: eventConversationId, inboundExternalId }) {
                 const { error } = await db.from('emergency_ai_events').insert({
                   company_id: eventCompanyId,
                   conversation_id: eventConversationId,
                   inbound_message_id: inboundRowId,
                   event_type: 'inbound_detected',
                   outcome: 'allowed',
-                  idempotency_key: `emergency-ai:inbound:${inboundMessageId}`,
+                  idempotency_key: `emergency-ai:inbound:${inboundExternalId}`,
                 });
                 if (!error) return 'claimed';
                 if (error.code === '23505') return 'duplicate';
@@ -893,20 +902,29 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
               async recordAIResponse({
                 companyId: eventCompanyId,
                 conversationId: eventConversationId,
-                inboundMessageId,
-                outboundMessageId,
+                inboundExternalId,
+                outboundMessageUuid,
                 model,
               }) {
+                const outboundUuid = toInternalMessageUuid(outboundMessageUuid);
+                if (outboundMessageUuid && !outboundUuid) {
+                  // Nunca grava o WAMID externo em coluna UUID. O evento fica
+                  // sem vínculo em vez de derrubar o registro com 22P02.
+                  console.warn(
+                    '[IA de Emergência] UUID interno inválido ao registrar resposta; vínculo omitido.'
+                  );
+                }
+
                 const { error } = await db.from('emergency_ai_events').insert({
                   company_id: eventCompanyId,
                   conversation_id: eventConversationId,
                   inbound_message_id: inboundRowId,
-                  outbound_message_id: outboundMessageId,
+                  outbound_message_id: outboundUuid,
                   event_type: 'ai_response',
                   outcome: 'recorded',
                   provider: 'gemini',
                   model: model ? model.slice(0, 150) : null,
-                  idempotency_key: `emergency-ai:response:${inboundMessageId}`.slice(0, 255),
+                  idempotency_key: `emergency-ai:response:${inboundExternalId}`.slice(0, 255),
                 });
                 if (error && error.code !== '23505') {
                   console.warn(
@@ -918,7 +936,7 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
               async recordGenerationFailure({
                 companyId: eventCompanyId,
                 conversationId: eventConversationId,
-                inboundMessageId,
+                inboundExternalId,
                 errorCode,
                 model,
               }) {
@@ -931,7 +949,7 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
                   provider: 'gemini',
                   model: model ? model.slice(0, 150) : null,
                   error_code: errorCode.slice(0, 100),
-                  idempotency_key: `emergency-ai:error:${inboundMessageId}`.slice(0, 255),
+                  idempotency_key: `emergency-ai:error:${inboundExternalId}`.slice(0, 255),
                 });
                 if (error && error.code !== '23505') {
                   // Nunca registra conteúdo, prompt, chave ou stack trace.
@@ -1002,7 +1020,7 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
                 companyId,
                 contactId: contact.id,
                 customerMessage: content,
-                inboundMessageId: String(inbound.id),
+                inboundExternalId: String(inbound.id),
                 receivedAt: now,
                 isCustomerTextMessage: true,
               },

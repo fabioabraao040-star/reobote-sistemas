@@ -64,6 +64,7 @@ interface HarnessOptions {
   claim?: 'auto' | 'claimed' | 'duplicate' | 'unavailable';
   dispatchOk?: boolean;
   dispatchConfigNull?: boolean;
+  dispatchMessageId?: string | null;
   phone?: string | null;
   generateContent?: (params: {
     model: string;
@@ -91,17 +92,18 @@ function makeHarness(options: HarnessOptions = {}) {
     responses: [] as Array<{
       companyId: string;
       conversationId: string;
-      inboundMessageId: string;
-      outboundMessageId: string | null;
+      inboundExternalId: string;
+      outboundMessageUuid: string | null;
       model: string | null;
     }>,
     failures: [] as Array<{
       companyId: string;
       conversationId: string;
-      inboundMessageId: string;
+      inboundExternalId: string;
       errorCode: string;
       model: string | null;
     }>,
+    wamid: [] as Array<{ messageId: string; whatsappMessageId: string }>,
     conversations: 0,
     logs: [] as unknown[][],
   };
@@ -159,15 +161,15 @@ function makeHarness(options: HarnessOptions = {}) {
     async hasAgentReplySince() {
       return agentReply;
     },
-    async claimInboundEvent({ inboundMessageId }) {
-      calls.claim.push(inboundMessageId);
+    async claimInboundEvent({ inboundExternalId }) {
+      calls.claim.push(inboundExternalId);
       if (options.claim && options.claim !== 'auto') {
         return options.claim;
       }
-      if (claimed.has(inboundMessageId)) {
+      if (claimed.has(inboundExternalId)) {
         return 'duplicate';
       }
-      claimed.add(inboundMessageId);
+      claimed.add(inboundExternalId);
       return 'claimed';
     },
     async recordGenerationFailure(input) {
@@ -183,8 +185,8 @@ function makeHarness(options: HarnessOptions = {}) {
       calls.insertAi.push(input);
       return 'ai-message-1';
     },
-    async setAiMessageWhatsAppId() {
-      // Registrado implicitamente; o ID real é validado no adaptador do servidor.
+    async setAiMessageWhatsAppId(messageId, whatsappMessageId) {
+      calls.wamid.push({ messageId, whatsappMessageId });
     },
     async markAiMessageFailed(messageId) {
       calls.failed.push(messageId);
@@ -201,7 +203,11 @@ function makeHarness(options: HarnessOptions = {}) {
       if (options.dispatchOk === false) {
         return { ok: false, error: 'meta refused' };
       }
-      return { ok: true, messageId: 'wamid-ai-1' };
+      return {
+        ok: true,
+        messageId:
+          options.dispatchMessageId === undefined ? 'wamid-ai-1' : options.dispatchMessageId,
+      };
     },
   };
 
@@ -227,7 +233,7 @@ function makeInput(overrides: Record<string, unknown> = {}) {
     companyId: 'company-1',
     contactId: 'contact-1',
     customerMessage: 'Olá, preciso de ajuda.',
-    inboundMessageId: 'wamid-in-1',
+    inboundExternalId: 'wamid-in-1',
     receivedAt: '2026-10-28T12:00:00.000Z',
     isCustomerTextMessage: true,
     ...overrides,
@@ -274,11 +280,56 @@ test('IA ativada processa mensagem elegível, registra histórico e envia', asyn
   assert.equal(harness.calls.responses.length, 1);
   assert.equal(harness.calls.responses[0].companyId, 'company-1');
   assert.equal(harness.calls.responses[0].conversationId, 'conv-1');
-  assert.equal(harness.calls.responses[0].inboundMessageId, 'wamid-in-1');
+  assert.equal(harness.calls.responses[0].inboundExternalId, 'wamid-in-1');
+  // Regressão do 22P02: o UUID interno de messages.id vai para outbound_message_id.
+  assert.equal(harness.calls.responses[0].outboundMessageUuid, 'ai-message-1');
+  assert.notEqual(harness.calls.responses[0].outboundMessageUuid, 'wamid-ai-1');
+  // O WAMID externo continua indo apenas para messages.whatsapp_message_id.
+  assert.deepEqual(harness.calls.wamid, [
+    { messageId: 'ai-message-1', whatsappMessageId: 'wamid-ai-1' },
+  ]);
   assert.equal(harness.calls.responses[0].model, EMERGENCY_AI_DEFAULT_MODEL);
   assert.equal(harness.calls.touch.length, 1);
   assert.equal(harness.calls.touch[0].at, '2026-10-28T12:00:05.000Z');
   assert.equal(harness.calls.failed.length, 0);
+});
+
+test('evento de resposta usa o UUID interno mesmo sem WAMID de retorno', async () => {
+  const harness = makeHarness({ enabled: true, dispatchMessageId: null });
+
+  const result = await processEmergencyAIInbound({
+    service: harness.service,
+    adapter: harness.adapter,
+    input: makeInput(),
+    logger: quietLogger,
+  });
+
+  assert.equal(result.status, 'sent');
+  assert.equal(harness.calls.wamid.length, 0);
+  assert.equal(harness.calls.responses.length, 1);
+  assert.equal(harness.calls.responses[0].outboundMessageUuid, 'ai-message-1');
+});
+
+test('WAMID externo nunca é enviado para a coluna UUID do evento', () => {
+  // Regressão estática do 22P02: o evento usa o UUID interno de messages.id.
+  const recordBlock = SERVER_SOURCE.slice(
+    SERVER_SOURCE.indexOf('async recordAIResponse('),
+    SERVER_SOURCE.indexOf('async recordGenerationFailure(')
+  );
+
+  assert.ok(recordBlock.length > 0);
+  assert.match(recordBlock, /outbound_message_id:\s*outboundUuid/);
+  assert.doesNotMatch(recordBlock, /outbound_message_id:\s*outboundMessageUuid/);
+  assert.doesNotMatch(recordBlock, /outbound_message_id:\s*dispatch\.messageId/);
+  assert.match(SERVER_SOURCE, /function toInternalMessageUuid/);
+  assert.match(SERVER_SOURCE, /UUID_PATTERN/);
+
+  const orchestratorSource = readFileSync(
+    new URL('../src/server/emergencyAIWebhook.ts', import.meta.url),
+    'utf8'
+  );
+  assert.match(orchestratorSource, /outboundMessageUuid:\s*messageId/);
+  assert.doesNotMatch(orchestratorSource, /outboundMessageUuid:\s*dispatch\.messageId/);
 });
 
 test('falha ao registrar sucesso não desfaz envio confirmado', async () => {
@@ -589,7 +640,7 @@ test('evento sem identificador da mensagem é ignorado', async () => {
   const result = await processEmergencyAIInbound({
     service: harness.service,
     adapter: harness.adapter,
-    input: makeInput({ inboundMessageId: null }),
+    input: makeInput({ inboundExternalId: null }),
     logger: quietLogger,
   });
 
