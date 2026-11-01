@@ -687,30 +687,76 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
   }
 
   try {
-    // A configuração é global no schema atual. Se houver company_id, usa;
-    // caso contrário, resolve pela primeira unidade (cenário de uma empresa).
-    // phone_number identifica mensagens enviadas pela própria empresa, que
-    // nunca devem receber resposta automática.
-    const { data: cfg } = await db
-      .from('whatsapp_configs')
-      .select('company_id, phone_number')
-      .limit(1)
-      .maybeSingle();
+    // Extrair o phone_number_id do número receptor do evento Meta.
+    // Cada configuração de WhatsApp tem um phone_number_id único e exclusivo.
+    // Usar esse identificador para associar a empresa correta, evitando seleção
+    // arbitrária ou fallback para a "primeira" empresa.
+    let eventPhoneNumberId: string | null = null;
+    let businessPhone: string = '';
 
-    const businessPhone = String(cfg?.phone_number || '').replace(/\D/g, '');
-    let companyId: string | null = cfg?.company_id || null;
-    if (!companyId) {
-      const { data: firstCompany } = await db
-        .from('companies')
-        .select('id')
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      companyId = firstCompany?.id || null;
+    // Primeiro passe: extrair o phone_number_id do receptor do evento.
+    // Isso ocorre antes do processamento completo de mensagens para garantir
+    // que a empresa correta seja identificada baseada no número receptor.
+    const outerEntries = Array.isArray(body.entry) ? body.entry : [];
+    for (const entry of outerEntries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        const value = change?.value;
+        if (!value) continue;
+
+        const inboundMessages = Array.isArray(value.messages) ? value.messages : [];
+        for (const inbound of inboundMessages) {
+          // O Meta webhook disponibiliza o phone_number_id do número receptor
+          // nos metadados da mensagem recebida.
+          const metadata = inbound.metadata;
+          if (metadata && metadata.phone_number_id) {
+            eventPhoneNumberId = metadata.phone_number_id;
+            break;
+          }
+        }
+
+        if (eventPhoneNumberId) break;
+      }
+
+      if (eventPhoneNumberId) break;
     }
 
-    if (!companyId) {
-      console.error('[Meta Webhook] Nenhuma empresa cadastrada para associar a mensagem.');
+    // Localizar a configuração da WhatsApp pelo phone_number_id identificado.
+    // Esta é a fonte única e autorizada para determinar a empresa e as credenciais.
+    let phoneCfg: any = null;
+    if (eventPhoneNumberId) {
+      phoneCfg = await db
+        .from('whatsapp_configs')
+        .select('company_id, is_verified, access_token, phone_number_id, phone_number')
+        .eq('phone_number_id', eventPhoneNumberId)
+        .maybeSingle();
+    }
+
+    // Se não houver configuração correspondente ao phone_number_id do evento,
+    // bloquear resposta automática e retornar ao Meta imediatamente.
+    if (!phoneCfg) {
+      console.error(
+        '[Meta Webhook] Configuração WhatsApp não encontrada para o phone_number_id:',
+        eventPhoneNumberId
+      );
+      return res.status(200).send('EVENT_RECEIVED');
+    }
+
+    // Obter company_id e businessPhone da configuração validada.
+    // Já validamos que phoneCfg existe e tem is_verified, access_token, phone_number_id.
+    // company_id deve existir pois viemos de uma configuração válida da WhatsApp.
+    const companyId = phoneCfg.company_id!;
+    businessPhone = String(phoneCfg.phone_number || '').replace(/\D/g, '');
+
+    // Validar se a configuração está completamente configurada para envio.
+    // Apenas proceed se is_verified for true e as credenciais estiverem presentes.
+    if (!phoneCfg?.is_verified || !phoneCfg?.access_token || !phoneCfg?.phone_number_id) {
+      console.error(
+        '[Meta Webhook] Configuração WhatsApp não validada para envio: is_verified=',
+        phoneCfg?.is_verified,
+        ', access_token presente=',
+        !!phoneCfg?.access_token
+      );
       return res.status(200).send('EVENT_RECEIVED');
     }
 

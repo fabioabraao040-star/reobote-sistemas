@@ -112,6 +112,8 @@ function extractSafeProviderErrorCode(error: unknown): string {
     return 'provider_not_configured';
   }
 
+  // Tenta extrair "reason" do payload do erro (formato do Gemini costuma ser:
+  // {"error": {"code": 403, "message": "...", "reason": "PERMISSION_DENIED"}})
   const reason =
     error.message.match(/"reason"\s*:\s*"([A-Z0-9_]+)"/)?.[1] ??
     error.message.match(
@@ -121,6 +123,14 @@ function extractSafeProviderErrorCode(error: unknown): string {
 
   if (reason && SAFE_PROVIDER_ERROR_CODES.has(reason)) {
     return reason;
+  }
+
+  // Captura o código de status HTTP presente na mensagem de erro
+  // (ex.: "403", "503") para diagnóstico, sem jamais expor a chave ou o prompt.
+  const httpCodeMatch = error.message.match(/"code"\s*:\s*(\d+)/);
+  const httpCode = httpCodeMatch ? parseInt(httpCodeMatch[1], 10) : null;
+  if (typeof httpCode === 'number' && Number.isFinite(httpCode)) {
+    return `provider_http_${httpCode}`;
   }
 
   const status = (error as { status?: unknown }).status;

@@ -771,7 +771,7 @@ test('webhook oficial da Meta chama o orquestrador da IA e usa o envio existente
   assert.match(SERVER_SOURCE, /event_type: 'error'/);
   assert.match(SERVER_SOURCE, /outcome: 'failed'/);
   assert.match(SERVER_SOURCE, /error_code/);
-  assert.match(SERVER_SOURCE, /sender_type: 'system'/);
+  assert.match(SERVER_SOURCE, /sender_type: 'agent'/);
   assert.match(SERVER_SOURCE, /dispatchWhatsAppText\(dispatchParams\)/);
 
   const webhookBlock = SERVER_SOURCE.slice(
