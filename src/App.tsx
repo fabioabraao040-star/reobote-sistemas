@@ -15,6 +15,7 @@ import Automacoes from './pages/Automacoes.tsx';
 import MensagensProntas from './pages/MensagensProntas.tsx';
 import MasterAdminDashboard from './pages/MasterAdminDashboard.tsx';
 import MetaAgentIntegrationPanel from './pages/MetaAgentIntegration.tsx';
+import GoogleCalendarIntegration from './pages/GoogleCalendarIntegration.tsx';
 
 export default function App() {
   return (
@@ -86,6 +87,16 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <MetaAgentIntegrationPanel />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ADM - Integração Google Calendar (OAuth 2.0) */}
+            <Route
+              path="/integracao-google-calendar"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <GoogleCalendarIntegration />
                 </ProtectedRoute>
               }
             />

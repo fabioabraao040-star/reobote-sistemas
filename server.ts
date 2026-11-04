@@ -29,6 +29,10 @@ import { createMetaAgentRouter } from './src/server/metaAgentRoutes.js';
 import { createMetaAgentService } from './src/server/metaAgentService.js';
 import { createMetaAgentClient } from './src/server/metaAgentClient.js';
 import { createMetaAgentStore } from './src/server/metaAgentStore.js';
+import { createGoogleCalendarRouter } from './src/server/googleCalendarRoutes.js';
+import { createGoogleCalendarService } from './src/server/googleCalendarService.js';
+import { createGoogleCalendarStore } from './src/server/googleCalendarStore.js';
+import { verifyState as verifyGoogleState } from './src/server/googleCalendarCrypto.js';
 
 dotenv.config();
 
@@ -391,6 +395,58 @@ const metaAgentService = createMetaAgentService({
 });
 
 app.use('/api/meta-agent', authMiddleware, createMetaAgentRouter({ service: metaAgentService }));
+
+// ============================================================================
+// GOOGLE CALENDAR OAUTH 2.0 (somente ADM operacional)
+// ============================================================================
+// Callback OAuth é público (redirect do Google não carrega sessão); a validação
+// ocorre via `state` assinado (HMAC) com TTL e vínculo à empresa.
+const googleCalendarService = createGoogleCalendarService({
+  store: createGoogleCalendarStore(() => supabase),
+  getClientConfig: () => {
+    const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim();
+    if (!clientId || !clientSecret || !redirectUri) return null;
+    return { clientId, clientSecret, redirectUri };
+  },
+  getCalendarId: () =>
+    process.env.GOOGLE_CALENDAR_ID?.trim() ||
+    '4243247178dc52a99520497e277bb3b57149384fac1a9f181341d142471efbb3@group.calendar.google.com',
+  getTimeZone: () => 'America/Sao_Paulo',
+});
+
+// Callback público do OAuth (redirect do Google).
+app.get('/api/google-calendar/callback', async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const oauthError = typeof req.query.error === 'string' ? req.query.error : '';
+  const appUrl = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+  if (oauthError) {
+    return res.redirect(`${appUrl}/integracao-google-calendar?status=error&reason=${encodeURIComponent(oauthError)}`);
+  }
+
+  let companyId = '';
+  try {
+    const payload = JSON.parse(Buffer.from(String(state).split('.')[0], 'base64url').toString('utf8'));
+    companyId = typeof payload?.companyId === 'string' ? payload.companyId : '';
+  } catch {
+    companyId = '';
+  }
+
+  const result = await googleCalendarService.handleCallback({ code, state, expectedCompanyId: companyId });
+  if (!result.ok) {
+    return res.redirect(`${appUrl}/integracao-google-calendar?status=error&reason=${encodeURIComponent(result.message)}`);
+  }
+  return res.redirect(`${appUrl}/integracao-google-calendar?status=connected`);
+});
+
+app.use('/api/google-calendar', authMiddleware, createGoogleCalendarRouter({
+  service: googleCalendarService,
+  verifyStateFn: verifyGoogleState,
+  getAppUrl: () => (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, ''),
+}));
 
 // 1. WhatsApp Official Meta API Configuration (Admin Only)
 app.get('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {

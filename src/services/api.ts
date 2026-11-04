@@ -212,6 +212,53 @@ export const api = {
     return data;
   },
 
+  // Google Calendar (OAuth + disponibilidade) — somente ADM; regras no backend
+  async getGoogleCalendarStatus() {
+    const res = await fetch('/api/google-calendar/status', { headers: getAuthHeaders(), cache: 'no-store' });
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || 'Erro ao consultar Google Calendar.');
+    return data;
+  },
+  async connectGoogleCalendar() {
+    // Redireciona o navegador para o fluxo OAuth do Google.
+    window.location.href = '/api/google-calendar/connect';
+  },
+  async disconnectGoogleCalendar() {
+    const res = await fetch('/api/google-calendar/disconnect', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({}),
+    });
+    const data = await parseJson(res);
+    return data;
+  },
+  async getGoogleCalendarAvailability(timeMin: string, timeMax: string, duration = 60) {
+    const res = await fetch(
+      `/api/google-calendar/availability?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&duration=${duration}`,
+      { headers: getAuthHeaders(), cache: 'no-store' },
+    );
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error(data.error || data.message || 'Erro ao consultar disponibilidade.');
+    return data;
+  },
+  async createGoogleCalendarEvent(payload: { summary: string; description?: string; start: string; end: string; attendeeEmail?: string }) {
+    const res = await fetch('/api/google-calendar/events', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJson(res);
+    return data;
+  },
+  async cancelGoogleCalendarEvent(eventId: string) {
+    const res = await fetch(`/api/google-calendar/events/${encodeURIComponent(eventId)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    const data = await parseJson(res);
+    return data;
+  },
+
   // Contatos
   async getContacts() {
     const res = await fetch('/api/contacts', { headers: getAuthHeaders() });

@@ -18,6 +18,7 @@ export default function Layout() {
   const adminNavItems = [
     { name: 'Dashboard Administrativo', path: '/dashboard', icon: 'dashboard', badge: 'Admin' },
     { name: 'Integração Meta Business Agent', path: '/integracao-meta', icon: 'smart_toy' },
+    { name: 'Integração Google Calendar', path: '/integracao-google-calendar', icon: 'calendar_month' },
     { name: 'Contatos de Clientes', path: '/contatos', icon: 'contacts' },
     { name: 'Usuários e Atendentes', path: '/atendentes', icon: 'manage_accounts', badge: 'Gestão' },
     { name: 'Mensagens Prontas', path: '/mensagens', icon: 'quickreply' },
@@ -46,6 +47,8 @@ export default function Layout() {
         return isAdmin ? 'Gerenciamento de Usuários e Atendentes' : 'Equipe de Atendimento';
       case '/integracao-meta':
         return 'Painel de Integração Meta Business Agent';
+      case '/integracao-google-calendar':
+        return 'Painel de Integração Google Calendar';
       case '/automacoes':
         return isAdmin ? 'Configuração de Automações Globais' : 'Automações da Empresa';
       case '/mensagens':
