@@ -17,6 +17,7 @@ export default function Layout() {
 
   const adminNavItems = [
     { name: 'Dashboard Administrativo', path: '/dashboard', icon: 'dashboard', badge: 'Admin' },
+    { name: 'Integração Meta Business Agent', path: '/integracao-meta', icon: 'smart_toy' },
     { name: 'Contatos de Clientes', path: '/contatos', icon: 'contacts' },
     { name: 'Usuários e Atendentes', path: '/atendentes', icon: 'manage_accounts', badge: 'Gestão' },
     { name: 'Mensagens Prontas', path: '/mensagens', icon: 'quickreply' },
@@ -43,6 +44,8 @@ export default function Layout() {
         return isAdmin ? 'Gestão Geral de Contatos' : 'Contatos da Unidade';
       case '/atendentes':
         return isAdmin ? 'Gerenciamento de Usuários e Atendentes' : 'Equipe de Atendimento';
+      case '/integracao-meta':
+        return 'Painel de Integração Meta Business Agent';
       case '/automacoes':
         return isAdmin ? 'Configuração de Automações Globais' : 'Automações da Empresa';
       case '/mensagens':

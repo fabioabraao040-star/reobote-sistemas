@@ -16,7 +16,6 @@
     "integration:test": "tsx scripts/test-integration-event.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/cors": "^2.8.19",

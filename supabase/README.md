@@ -8,7 +8,7 @@ Esta pasta contém a migration inicial para um **projeto Supabase novo e exclusi
 - `migrations/20261022010000_unique_whatsapp_message_id.sql` — unicidade parcial de `messages.whatsapp_message_id` para idempotência do webhook.
 - `migrations/20261025000000_add_master_admin_role.sql` — papel `master_admin` e helpers de autorização global.
 - `migrations/20261027000000_add_conversation_opened_at.sql` — coluna `conversations.opened_at`, gravada pelo REOBOTE quando o atendente abre a conversa.
-- `migrations/20261027010000_add_emergency_ai.sql` — configuração, auditoria e eventos futuros da IA de Emergência. **Não aplicada automaticamente por este repositório.**
+- `migrations/20261027010000_add_emergency_ai.sql` — configuração, auditoria e eventos da antiga IA de Emergência. **Não aplicada automaticamente por este repositório.** A integração foi removida do código (ver seção "IA de Emergência"); a limpeza no banco está pendente de autorização.
 - `validation/001_post_install.sql` — verificações somente leitura após a instalação.
 
 ## O que a migration cria
@@ -167,42 +167,24 @@ Testes funcionais recomendados depois da configuração:
 - Configuração do WhatsApp só é acessível pelo backend.
 - Webhook da Meta responde ao desafio e valida assinatura.
 
-## IA de Emergência
+## IA de Emergência (removida do código — Fase 1)
 
-Superfície administrativa implementada no backend:
+> **Status (03/11/2026):** a integração da IA de Emergência (Gemini) foi
+> **removida do código da aplicação**: rotas `/api/emergency-ai*`, serviço,
+> orquestrador do webhook, card administrativo, dependência `@google/genai` e a
+> variável `GEMINI_API_KEY` não existem mais. O webhook não invoca nenhuma IA.
 
-| Método | Rota | Autorização |
-|---|---|---|
-| `GET` | `/api/emergency-ai` | JWT válido + `users.role = 'admin'` |
-| `POST` | `/api/emergency-ai/activate` | JWT válido + `users.role = 'admin'` |
-| `POST` | `/api/emergency-ai/deactivate` | JWT válido + `users.role = 'admin'` |
-| `GET` | `/api/emergency-ai/history?limit=20` | JWT válido + `users.role = 'admin'` |
+As estruturas de banco continuam existindo (esta fase **não** alterou o banco):
 
-`master_admin` e `user` recebem `403`; sem Bearer token, `401`. A interface só
-mostra `ATIVA` depois que o backend confirma a gravação. Falha de leitura ou de
-persistência nunca é interpretada como autorização.
+| Estrutura | Estado |
+|---|---|
+| `migrations/20261027010000_add_emergency_ai.sql` | Arquivo preservado |
+| `emergency_ai_configs`, `emergency_ai_audit_logs`, `emergency_ai_events` | Tabelas preservadas; sem uso no código |
+| `set_emergency_ai_enabled` | RPC preservado; sem uso no código |
 
-Contrato preparado para a futura integração com mensagens:
-
-1. Antes de qualquer resposta automática, consultar
-   `public.emergency_ai_configs` pelo identificador global (`company_id IS NULL`)
-   e exigir `enabled = true`.
-2. Qualquer erro de leitura deve ser tratado como desativado e a conversa deve
-   seguir para atendimento humano.
-3. Não chamar provedor de IA quando `enabled = false`; registrar
-   `disabled_skip` em `emergency_ai_events` se o evento for pertinente.
-4. Usar `idempotency_key` único para impedir duas respostas para o mesmo evento.
-5. Registrar `provider`, `model`, `input_tokens`, `output_tokens` e
-   `total_tokens` quando o provedor informar; nunca gravar conteúdo integral da
-   mensagem nem credenciais.
-6. Em falha do provedor, transferir para humano e registrar `human_handoff` ou
-   `error`, sem repetir a resposta automaticamente.
-7. A desativação deve interromper novas respostas; uma resposta já em voo não
-   pode ser reenviada pelo webhook.
-
-O webhook atual **permanece inalterado** nesta etapa. Não há chamada real a
-provedor de IA, envio de mensagem automática, cobrança de tokens ou integração
-Meta nova.
+A limpeza definitiva dessas estruturas no Supabase (novas migrations
+`drop table/function`) depende de decisão e autorização explícitas, pois pode
+afetar histórico/auditoria já gravados.
 
 ## Riscos e limites conhecidos
 
@@ -222,7 +204,7 @@ Meta nova.
 - **`whatsapp_configs.access_token`/`verify_token` têm default vazio** para compatibilidade com o código, que permite salvar a configuração sem tokens. A conexão com a Meta só funciona após preenchê-los.
 - **Rotas temporárias removidas:** `/api/diag`, `/api/diag/create-admin`, `DIAG_TOKEN` e as páginas públicas de diagnóstico não fazem mais parte do código de produção.
 - **Migrations aplicadas:** o schema inicial e o índice único do webhook foram aplicados no projeto novo `csizihsuyzwaukdvzsaj` em 22/10/2026. O projeto legado `uidjqspmkbeztjzftvkv` permanece intocado.
-- **IA de Emergência ainda não integrada ao fluxo real:** a migration, as rotas e o card administrativo estão implementados localmente, mas o webhook continua sem chamar IA. Ativar o card não envia mensagens. A configuração de provedor/modelo ainda é manual na tabela, sem tela de edição nesta etapa.
-- **Credencial do provedor:** `GEMINI_API_KEY` é usada apenas para indicar `configured`/`unavailable`; o valor nunca é retornado. Se o provedor/modelo estiver definido sem credencial válida, o estado é `unavailable`.
+- **IA de Emergência removida do código (Fase 1):** não restam rotas, serviços, card administrativo nem chamada no webhook. As tabelas `emergency_ai_*` e o RPC `set_emergency_ai_enabled` seguem no banco, só como estrutura; a limpeza final depende de autorização.
+- **Credencial do provedor:** a variável `GEMINI_API_KEY` foi removida de `.env`/`.env.example` e a dependência `@google/genai` de `package.json`.
 - **Concorrência:** a alteração de estado usa `pg_advisory_xact_lock` e grava estado + auditoria na mesma transação. Ainda assim, chamadas simultâneas são serializadas; não há promessa de ordem entre elas.
 - **Histórico:** registra apenas alterações efetivas confirmadas. Uma ativação quando já está ativa não gera novo registro; falhas de persistência não geram registro de sucesso.

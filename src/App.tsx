@@ -14,6 +14,7 @@ import Atendentes from './pages/Atendentes.tsx';
 import Automacoes from './pages/Automacoes.tsx';
 import MensagensProntas from './pages/MensagensProntas.tsx';
 import MasterAdminDashboard from './pages/MasterAdminDashboard.tsx';
+import MetaAgentIntegrationPanel from './pages/MetaAgentIntegration.tsx';
 
 export default function App() {
   return (
@@ -75,6 +76,16 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <Atendentes />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ADM - Integração oficial Meta Business Agent (backed by API real) */}
+            <Route
+              path="/integracao-meta"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <MetaAgentIntegrationPanel />
                 </ProtectedRoute>
               }
             />

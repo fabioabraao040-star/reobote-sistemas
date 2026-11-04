@@ -153,44 +153,62 @@ export const api = {
     return parseJson(res);
   },
 
-  // IA de Emergência (somente ADM no backend)
-  async getEmergencyAIStatus() {
-    const res = await fetch('/api/emergency-ai', { headers: getAuthHeaders(), cache: 'no-store' });
+  // Integração Meta Business Agent (somente ADM; regras ficam no backend)
+  async getMetaAgentStatus() {
+    const res = await fetch('/api/meta-agent', { headers: getAuthHeaders(), cache: 'no-store' });
     const data = await parseJson(res);
-    if (!res.ok) throw new Error(data.error || 'Erro ao consultar a IA de Emergência.');
+    if (!res.ok) throw new Error(data.error || 'Erro ao consultar a integração Meta Business Agent.');
     return data;
   },
 
-  async activateEmergencyAI(reason?: string) {
-    const res = await fetch('/api/emergency-ai/activate', {
+  async verifyMetaAgentConnection() {
+    const res = await fetch('/api/meta-agent/verify', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+      body: JSON.stringify({}),
     });
     const data = await parseJson(res);
-    if (!res.ok) throw new Error(data.error || 'Erro ao ativar a IA de Emergência.');
+    if (!res.ok && !data.ok) throw new Error(data.message || data.error || 'Verificação falhou.');
     return data;
   },
 
-  async deactivateEmergencyAI(reason?: string) {
-    const res = await fetch('/api/emergency-ai/deactivate', {
+  async connectMetaAgent() {
+    const res = await fetch('/api/meta-agent/connect', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+      body: JSON.stringify({}),
     });
     const data = await parseJson(res);
-    if (!res.ok) throw new Error(data.error || 'Erro ao desativar a IA de Emergência.');
     return data;
   },
 
-  async getEmergencyAIHistory(limit = 20) {
-    const safeLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 20)));
-    const res = await fetch(`/api/emergency-ai/history?limit=${safeLimit}`, {
+  async setMetaAgentRollout(enabled: boolean) {
+    const res = await fetch(`/api/meta-agent/${enabled ? 'enable' : 'disable'}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({}),
+    });
+    const data = await parseJson(res);
+    return data;
+  },
+
+  async releaseMetaAgentHandoff(conversationId: string) {
+    const res = await fetch('/api/meta-agent/handoff/release', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ conversationId }),
+    });
+    const data = await parseJson(res);
+    return data;
+  },
+
+  async listMetaAgentEvents(limit = 30) {
+    const res = await fetch(`/api/meta-agent/events?limit=${limit}`, {
       headers: getAuthHeaders(),
       cache: 'no-store',
     });
     const data = await parseJson(res);
-    if (!res.ok) throw new Error(data.error || 'Erro ao consultar o histórico da IA de Emergência.');
+    if (!res.ok) throw new Error(data.error || 'Erro ao carregar eventos da integração.');
     return data;
   },
 

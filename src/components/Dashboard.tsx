@@ -7,7 +7,6 @@ import {
   ConversationStatusLegend,
 } from './ConversationStatusIndicator';
 import { ConversationEventTimes } from './ConversationEventTimes';
-import { EmergencyAICard } from './EmergencyAICard';
 import { PieChartDeAtendimentos } from './PieChartDeAtendimentos';
 
 interface StatCardProps {
@@ -235,9 +234,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-            </div>
-            <div className="lg:col-span-1">
-              <EmergencyAICard />
             </div>
           </div>
         </>

@@ -21,17 +21,14 @@ import {
 import {
   adminOnlyMiddleware,
   createAuthMiddleware,
+  extractBearerToken,
   masterAdminOnlyMiddleware,
   type AuthenticatedRequest,
 } from './src/server/authMiddleware.js';
-import { createEmergencyAIRouter } from './src/server/emergencyAIRoutes.js';
-import { createEmergencyAIService } from './src/server/emergencyAIService.js';
-import { createSupabaseEmergencyAIStore } from './src/server/emergencyAIStore.js';
-import {
-  processEmergencyAIInbound,
-  type EmergencyAIConversationSnapshot,
-  type EmergencyAIWebhookAdapter,
-} from './src/server/emergencyAIWebhook.js';
+import { createMetaAgentRouter } from './src/server/metaAgentRoutes.js';
+import { createMetaAgentService } from './src/server/metaAgentService.js';
+import { createMetaAgentClient } from './src/server/metaAgentClient.js';
+import { createMetaAgentStore } from './src/server/metaAgentStore.js';
 
 dotenv.config();
 
@@ -272,14 +269,6 @@ const authMiddleware = createAuthMiddleware({
   masterAdminAllowedPaths: MASTER_ADMIN_ALLOWED_PATHS,
 });
 
-// Serviço administrativo da IA de Emergência. A configuração é global, como a
-// configuração oficial do WhatsApp no modelo atual. A autorização real de ADM
-// é aplicada pelo middleware e novamente dentro do router.
-const emergencyAIService = createEmergencyAIService({
-  store: createSupabaseEmergencyAIStore(() => supabase),
-  geminiApiKey: process.env.GEMINI_API_KEY || null,
-});
-
 // ============================================================================
 // ROTAS DE API DO SISTEMA (BACKEND REST)
 // ============================================================================
@@ -367,12 +356,41 @@ app.get('/api/monitoring/status', async (req, res) => {
 });
 
 // ============================================================================
-// IA DE EMERGÊNCIA (somente ADM operacional)
+// INTEGRAÇÃO META BUSINESS AGENT (somente ADM operacional)
 // ============================================================================
-// O router aplica adminOnlyMiddleware internamente. O authMiddleware valida o
-// JWT e o papel lido do banco; nenhum perfil enviado pelo navegador é aceito.
-// As rotas não alteram o webhook nem enviam mensagens nesta etapa.
-app.use('/api/emergency-ai', authMiddleware, createEmergencyAIRouter(emergencyAIService));
+// Usa exclusivamente as APIs oficiais do Meta Business Agent Platform:
+//   - GET  /{entity_id}/agent_eligibility             (X-API-Version: 2.0.0)
+//   - POST /{entity_id}/agent_onboarding              (X-API-Version: 2.0.0)
+//   - GET/PUT /{entity_id}/agent_config/settings      (X-API-Version: 2.0.0)
+//   - POST /business/whatsapp/phone_numbers/{id}/thread_control (1.0.0)
+// O router aplica adminOnlyMiddleware internamente; o authMiddleware valida o
+// JWT e o papel pela tabela users. Escopo por empresa garantido no serviço.
+const metaAgentService = createMetaAgentService({
+  store: createMetaAgentStore({ getSupabase: () => supabase }),
+  getWhatsAppConfig: (companyId) => getMetaAgentWhatsAppConfig(companyId),
+  createClient: (accessToken) =>
+    createMetaAgentClient({
+      accessToken,
+      baseUrl: process.env.META_AGENT_API_BASE || undefined,
+      // Runtime da Vercel (maxDuration 60s): cliente nunca pode travar a rota.
+      timeoutMs: 10_000,
+    }),
+  getConversationOwner: async (conversationId) => {
+    if (!supabase) return null;
+    const { data } = await supabase
+      .from('conversations')
+      .select('company_id, contact:contacts!conversations_contact_id_fkey(phone)')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (!data?.company_id) return null;
+    return {
+      companyId: String(data.company_id),
+      contactPhone: (data.contact as { phone?: string } | null)?.phone ?? null,
+    };
+  },
+});
+
+app.use('/api/meta-agent', authMiddleware, createMetaAgentRouter({ service: metaAgentService }));
 
 // 1. WhatsApp Official Meta API Configuration (Admin Only)
 app.get('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {
@@ -382,7 +400,7 @@ app.get('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async
 
   const { data: config, error } = await supabase
     .from('whatsapp_configs')
-    .select('*')
+    .select('id, company_id, phone_number, phone_number_id, waba_id, is_verified, access_token, verify_token, verified_name, quality_rating, last_health_check, updated_at')
     .limit(1)
     .single();
 
@@ -424,7 +442,7 @@ app.post('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, asyn
 
   const { data: existing, error: fetchError } = await supabase
     .from('whatsapp_configs')
-    .select('*')
+    .select('id, company_id, phone_number, phone_number_id, waba_id, is_verified, access_token, verify_token, verified_name, quality_rating, last_health_check, updated_at')
     .limit(1)
     .single();
 
@@ -490,7 +508,7 @@ app.post('/api/whatsapp/verify-connection', authMiddleware, masterAdminOnlyMiddl
 
   const { data: cfg, error } = await supabase
     .from('whatsapp_configs')
-    .select('*')
+    .select('id, company_id, phone_number, phone_number_id, waba_id, is_verified, access_token, verify_token, verified_name, quality_rating, last_health_check, updated_at')
     .limit(1)
     .single();
 
@@ -624,19 +642,6 @@ app.get('/api/webhook/whatsapp', async (req, res) => {
 });
 
 // Webhook Oficial da Meta (Recebimento de Eventos POST)
-// A resposta automática da IA de Emergência é opcional e fail-closed: só ocorre
-// quando a configuração persistida está enabled = true, a conversa é elegível e
-// não há atendente humano responsável. Qualquer erro de leitura ou geração
-// mantém o atendimento humano normal.
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// `emergency_ai_events.outbound_message_id` é UUID e referencia messages.id.
-// O WAMID externo da Meta (ex.: "wamid.HBg...") nunca pode entrar nessa coluna.
-function toInternalMessageUuid(value: string | null): string | null {
-  return typeof value === 'string' && UUID_PATTERN.test(value) ? value : null;
-}
-
 app.post('/api/webhook/whatsapp', async (req, res) => {
   const signature = req.headers['x-hub-signature-256'];
 
@@ -693,11 +698,62 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
     // arbitrária ou fallback para a "primeira" empresa.
     let eventPhoneNumberId: string | null = null;
     let businessPhone: string = '';
+    let hasMessagePayload = false;
 
     // Primeiro passe: extrair o phone_number_id do receptor do evento.
     // Isso ocorre antes do processamento completo de mensagens para garantir
     // que a empresa correta seja identificada baseada no número receptor.
     const outerEntries = Array.isArray(body.entry) ? body.entry : [];
+
+    // Meta Business Agent — campo de webhook OFICIAL `messaging_handovers`:
+    // a Meta avisa o app que PERDEU o controle de uma conversa. No REOBOTE isso
+    // acontece quando devolvemos o controle ao agente (thread_control release).
+    // Processamento isolado, best-effort: falha de log não bloqueia o webhook.
+    for (const entry of outerEntries) {
+      const handoverChanges = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const handoverChange of handoverChanges) {
+        const controlTaken = handoverChange?.value?.control_taken;
+        if (!controlTaken) continue;
+        try {
+          const controlMetadata =
+            typeof controlTaken?.metadata === 'string' ? controlTaken.metadata : '';
+          const marker = 'reobote-v1:conv:';
+          if (controlMetadata.startsWith(marker)) {
+            const potentialId = controlMetadata.slice(marker.length).trim();
+            if (UUID_REGEX.test(potentialId)) {
+              const { data: conversation } = await db
+                .from('conversations')
+                .select('company_id')
+                .eq('id', potentialId)
+                .maybeSingle();
+              if (conversation?.company_id) {
+                const { data: integration } = await db
+                  .from('meta_business_agent_integrations')
+                  .select('id')
+                  .eq('company_id', conversation.company_id)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+                if (integration?.id) {
+                  await db.from('meta_business_agent_events').insert({
+                    integration_id: String(integration.id),
+                    event_type: 'handover_webhook',
+                    outcome: 'ok',
+                    error_code: null,
+                  });
+                }
+              }
+            }
+          }
+        } catch (handoverError) {
+          console.warn(
+            '[Meta Business Agent] Falha ao registrar handover:',
+            handoverError instanceof Error ? handoverError.message : 'erro desconhecido'
+          );
+        }
+      }
+    }
+
     for (const entry of outerEntries) {
       const changes = Array.isArray(entry?.changes) ? entry.changes : [];
       for (const change of changes) {
@@ -705,6 +761,9 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
         if (!value) continue;
 
         const inboundMessages = Array.isArray(value.messages) ? value.messages : [];
+        if (inboundMessages.length > 0 || (Array.isArray(value.statuses) && value.statuses.length > 0)) {
+          hasMessagePayload = true;
+        }
         for (const inbound of inboundMessages) {
           // O Meta webhook disponibiliza o phone_number_id do número receptor
           // nos metadados da mensagem recebida.
@@ -723,22 +782,29 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
 
     // Localizar a configuração da WhatsApp pelo phone_number_id identificado.
     // Esta é a fonte única e autorizada para determinar a empresa e as credenciais.
-    let phoneCfg: any = null;
+    let phoneCfg: { company_id: string; is_verified: boolean; access_token: string; phone_number_id: string; phone_number: string | null } | null = null;
     if (eventPhoneNumberId) {
-      phoneCfg = await db
+      const { data: cfg, error: cfgError } = await db
         .from('whatsapp_configs')
         .select('company_id, is_verified, access_token, phone_number_id, phone_number')
         .eq('phone_number_id', eventPhoneNumberId)
         .maybeSingle();
+      if (cfgError) {
+        console.error('[Meta Webhook] Erro ao consultar configuração WhatsApp:', cfgError.code || 'erro');
+      }
+      phoneCfg = cfg ?? null;
     }
 
     // Se não houver configuração correspondente ao phone_number_id do evento,
     // bloquear resposta automática e retornar ao Meta imediatamente.
     if (!phoneCfg) {
-      console.error(
-        '[Meta Webhook] Configuração WhatsApp não encontrada para o phone_number_id:',
-        eventPhoneNumberId
-      );
+      // Handovers e eventos sem payload de mensagem não geram ruído no log.
+      if (hasMessagePayload) {
+        console.error(
+          '[Meta Webhook] Configuração WhatsApp não encontrada para o phone_number_id:',
+          eventPhoneNumberId
+        );
+      }
       return res.status(200).send('EVENT_RECEIVED');
     }
 
@@ -776,11 +842,6 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
 
           // Mensagem enviada pela própria empresa/sistema nunca é respondida.
           if (businessPhone && from === businessPhone) continue;
-
-          const isCustomerTextMessage =
-            inbound?.type === 'text' &&
-            typeof inbound?.text?.body === 'string' &&
-            inbound.text.body.trim().length > 0;
 
           if (inbound?.id) {
             const { data: existingMessage } = await supabase
@@ -873,7 +934,7 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
           // Insere a mensagem ANTES de contabilizar não-lidas. Se a Meta
           // reenviar o mesmo evento, o índice único em whatsapp_message_id
           // rejeita a duplicata e o contador da conversa não é incrementado.
-          const { data: insertedMessage, error: messageError } = await supabase.from('messages').insert({
+          const { error: messageError } = await supabase.from('messages').insert({
             conversation_id: conversationId,
             sender_type: 'customer',
             content,
@@ -897,193 +958,6 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
               unread_count: isNewConversation ? 1 : (existingConv?.unread_count || 0) + 1,
             })
             .eq('id', conversationId);
-
-          if (!conversationId) continue;
-
-          // IA de Emergência: só texto de cliente e somente após a mensagem
-          // estar persistida. O orquestrador consulta o estado persistido antes
-          // de gerar e novamente antes de enviar. Falhas não impedem o
-          // atendimento humano.
-          if (isCustomerTextMessage && inbound?.id) {
-            const inboundRowId = insertedMessage?.id || null;
-
-            const emergencyAIAdapter: EmergencyAIWebhookAdapter = {
-              async getConversation(targetConversationId) {
-                const { data } = await db
-                  .from('conversations')
-                  .select('id, company_id, assigned_to, status')
-                  .eq('id', targetConversationId)
-                  .maybeSingle();
-                return (data as EmergencyAIConversationSnapshot | null) ?? null;
-              },
-              async hasAgentReplySince(targetConversationId, sinceIso) {
-                const { data } = await db
-                  .from('messages')
-                  .select('id')
-                  .eq('conversation_id', targetConversationId)
-                  .eq('sender_type', 'agent')
-                  .gt('created_at', sinceIso)
-                  .limit(1);
-                return Array.isArray(data) && data.length > 0;
-              },
-              async claimInboundEvent({ companyId: eventCompanyId, conversationId: eventConversationId, inboundExternalId }) {
-                const { error } = await db.from('emergency_ai_events').insert({
-                  company_id: eventCompanyId,
-                  conversation_id: eventConversationId,
-                  inbound_message_id: inboundRowId,
-                  event_type: 'inbound_detected',
-                  outcome: 'allowed',
-                  idempotency_key: `emergency-ai:inbound:${inboundExternalId}`,
-                });
-                if (!error) return 'claimed';
-                if (error.code === '23505') return 'duplicate';
-                // Migration ainda não aplicada: a deduplicação primária segue
-                // garantida pelo índice único de messages.whatsapp_message_id.
-                console.warn(
-                  '[IA de Emergência] Claim idempotente indisponível:',
-                  error.code || 'erro'
-                );
-                return 'unavailable';
-              },
-              async recordAIResponse({
-                companyId: eventCompanyId,
-                conversationId: eventConversationId,
-                inboundExternalId,
-                outboundMessageUuid,
-                model,
-              }) {
-                const outboundUuid = toInternalMessageUuid(outboundMessageUuid);
-                if (outboundMessageUuid && !outboundUuid) {
-                  // Nunca grava o WAMID externo em coluna UUID. O evento fica
-                  // sem vínculo em vez de derrubar o registro com 22P02.
-                  console.warn(
-                    '[IA de Emergência] UUID interno inválido ao registrar resposta; vínculo omitido.'
-                  );
-                }
-
-                const { error } = await db.from('emergency_ai_events').insert({
-                  company_id: eventCompanyId,
-                  conversation_id: eventConversationId,
-                  inbound_message_id: inboundRowId,
-                  outbound_message_id: outboundUuid,
-                  event_type: 'ai_response',
-                  outcome: 'recorded',
-                  provider: 'gemini',
-                  model: model ? model.slice(0, 150) : null,
-                  idempotency_key: `emergency-ai:response:${inboundExternalId}`.slice(0, 255),
-                });
-                if (error && error.code !== '23505') {
-                  console.warn(
-                    '[IA de Emergência] Falha ao registrar resposta:',
-                    error.code || 'erro'
-                  );
-                }
-              },
-              async recordGenerationFailure({
-                companyId: eventCompanyId,
-                conversationId: eventConversationId,
-                inboundExternalId,
-                errorCode,
-                model,
-              }) {
-                const { error } = await db.from('emergency_ai_events').insert({
-                  company_id: eventCompanyId,
-                  conversation_id: eventConversationId,
-                  inbound_message_id: inboundRowId,
-                  event_type: 'error',
-                  outcome: 'failed',
-                  provider: 'gemini',
-                  model: model ? model.slice(0, 150) : null,
-                  error_code: errorCode.slice(0, 100),
-                  idempotency_key: `emergency-ai:error:${inboundExternalId}`.slice(0, 255),
-                });
-                if (error && error.code !== '23505') {
-                  // Nunca registra conteúdo, prompt, chave ou stack trace.
-                  console.warn(
-                    '[IA de Emergência] Falha ao registrar evento de erro:',
-                    error.code || 'erro'
-                  );
-                }
-              },
-              async getContactPhone(contactId) {
-                const { data } = await db
-                  .from('contacts')
-                  .select('phone')
-                  .eq('id', contactId)
-                  .maybeSingle();
-                return data?.phone ?? null;
-              },
-              async insertAiMessage({ conversationId: aiConversationId, content: aiContent }) {
-                const { data, error } = await db
-                  .from('messages')
-                  .insert({
-                    conversation_id: aiConversationId,
-                    sender_type: 'system',
-                    sender_id: null,
-                    content: aiContent,
-                    status: 'sent',
-                  })
-                  .select('id')
-                  .single();
-                if (error || !data) {
-                  console.error('[IA de Emergência] Erro ao registrar resposta:', error?.message);
-                  return null;
-                }
-                return data.id;
-              },
-              async setAiMessageWhatsAppId(messageId, whatsappMessageId) {
-                await db
-                  .from('messages')
-                  .update({ whatsapp_message_id: whatsappMessageId, status: 'sent' })
-                  .eq('id', messageId);
-              },
-              async markAiMessageFailed(messageId) {
-                await db.from('messages').update({ status: 'failed' }).eq('id', messageId);
-              },
-              async touchConversation({ conversationId: aiConversationId, content: aiContent, at }) {
-                const error = await updateConversationState(aiConversationId, {
-                  last_message: aiContent,
-                  last_message_at: at,
-                  unread_count: 0,
-                });
-                if (error) {
-                  console.error('[IA de Emergência] Erro ao atualizar conversa:', error.message);
-                }
-              },
-              async getDispatchConfig() {
-                return getWhatsAppDispatchConfig();
-              },
-              async dispatchText(dispatchParams) {
-                return dispatchWhatsAppText(dispatchParams);
-              },
-            };
-
-            const aiResult = await processEmergencyAIInbound({
-              service: emergencyAIService,
-              adapter: emergencyAIAdapter,
-              input: {
-                conversationId,
-                companyId,
-                contactId: contact.id,
-                customerMessage: content,
-                inboundExternalId: String(inbound.id),
-                receivedAt: now,
-                isCustomerTextMessage: true,
-              },
-            });
-
-            if (
-              aiResult.status === 'error' ||
-              aiResult.status === 'generation_failed' ||
-              aiResult.status === 'dispatch_failed'
-            ) {
-              console.error(
-                '[IA de Emergência] Resultado do processamento:',
-                aiResult.status,
-                aiResult.reason || ''
-              );
-            }
-          }
         }
 
         // Atualizações de entrega/leitura das mensagens enviadas
@@ -1925,6 +1799,53 @@ async function loadConversationStatusDetails(
 // DESPACHO OFICIAL PELA META CLOUD API (exclusivamente no backend)
 // ============================================================================
 
+// Configuração WhatsApp reutilizada PELA INTEGRAÇÃO META BUSINESS AGENT
+// (mesma linha de whatsapp_configs — nunca duplică o token).
+// Devolve também o id da linha, que é o FK gravado em
+// meta_business_agent_integrations.whatsapp_config_id.
+function getMetaAgentWhatsAppConfig(companyId?: string): Promise<{
+  id: string;
+  phoneNumberId: string;
+  accessToken: string;
+  isVerified: boolean;
+  phoneNumber: string | null;
+} | null> {
+  if (!supabase) return Promise.resolve(null);
+
+  return (async () => {
+    let query = supabase
+      .from('whatsapp_configs')
+      .select('id, company_id, phone_number_id, access_token, is_verified, phone_number')
+      .limit(1);
+
+    // Isolamento por empresa: configuração vinculada a uma empresa específica só
+    // pode ser usada por essa empresa. Configuração global (company_id NULL)
+    // permanece acessível (arquitetura single-tenant atual).
+    if (companyId) {
+      query = query.or(`company_id.is.null,company_id.eq.${companyId}`);
+    }
+
+    const { data: cfg } = await query.maybeSingle();
+
+    if (!cfg?.is_verified || !cfg.access_token || !cfg.phone_number_id || !cfg.id) {
+      return null;
+    }
+
+    // Defesa em profundidade: rejeitar configuração de outra empresa.
+    if (cfg.company_id && companyId && String(cfg.company_id) !== companyId) {
+      return null;
+    }
+
+    return {
+      id: String(cfg.id),
+      phoneNumberId: String(cfg.phone_number_id),
+      accessToken: String(cfg.access_token),
+      isVerified: true,
+      phoneNumber: typeof cfg.phone_number === 'string' ? cfg.phone_number : null,
+    };
+  })();
+}
+
 // Retorna credencial apenas quando o WhatsApp está conectado e validado.
 // Nunca devolve token ao cliente — é uso interno das rotas.
 async function getWhatsAppDispatchConfig(): Promise<{ phoneNumberId: string; accessToken: string } | null> {
@@ -2176,7 +2097,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req: Authentic
 
   const { data: conv, error: convError } = await supabase
     .from('conversations')
-    .select('*')
+    .select('id, company_id, contact_id, assigned_to, status, last_message, last_message_at, unread_count, opened_at, created_at, updated_at')
     .eq('id', req.params.id)
     .single();
 
@@ -2215,7 +2136,7 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
 
   const { data: conv, error: convError } = await supabase
     .from('conversations')
-    .select('*')
+    .select('id, company_id, contact_id, assigned_to, status, last_message, last_message_at, unread_count, opened_at, created_at, updated_at')
     .eq('id', req.params.id)
     .single();
 
@@ -2223,7 +2144,7 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req: Authenti
     return res.status(404).json({ error: 'Conversa não encontrada.' });
   }
 
-  if (req.authRole !== 'admin' && conv.company_id !== req.authCompanyId) {
+  if (!canAccessConversation(req.authRole, req.authCompanyId, conv, req.authUserId)) {
     return res.status(403).json({ error: 'Acesso negado a esta conversa.' });
   }
 
@@ -2336,7 +2257,7 @@ app.patch('/api/conversations/:id/status', authMiddleware, async (req: Authentic
 
   const { data: conv, error: convError } = await supabase
     .from('conversations')
-    .select('*')
+    .select('id, company_id, contact_id, assigned_to, status, last_message, last_message_at, unread_count, opened_at, created_at, updated_at')
     .eq('id', req.params.id)
     .single();
 
@@ -2568,7 +2489,21 @@ app.post('/api/auth/logout', async (req, res) => {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
 
-  await supabaseAuth.auth.signOut();
+  // Revoga a sessão do usuário no Supabase (refresh tokens), de forma que o
+  // token de acesso deixe de ser renovável. Tokens já emitidos expiram
+  // naturalmente; o backend já rejeita tokens inválidos/expirados via
+  // supabaseAuth.auth.getUser() no authMiddleware.
+  const token = extractBearerToken(req.headers.authorization);
+  if (token) {
+    try {
+      const { data } = await supabaseAuth.auth.getUser(token);
+      if (data?.user?.id) {
+        await supabaseAuth.auth.admin.signOut(data.user.id, 'global').catch(() => {});
+      }
+    } catch {
+      // Logout não deve falhar por erro de revogação remota.
+    }
+  }
 
   res.json({ success: true, message: 'Logout realizado com sucesso.' });
 });
@@ -2578,9 +2513,9 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(500).json({ error: 'Supabase não configurado.' });
   }
 
-  const { name, email, password, companyId } = req.body;
+  const { name, email, password } = req.body;
 
-  const invalidField = invalidStringField(req.body, ['name', 'email', 'password', 'companyId']);
+  const invalidField = invalidStringField(req.body, ['name', 'email', 'password']);
   if (invalidField) {
     return res.status(400).json({ error: `Campo inválido: ${invalidField}.` });
   }
@@ -2593,13 +2528,9 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ error: 'A senha deve conter no mínimo 6 caracteres.' });
   }
 
-  // Empresa informada precisa ser um UUID válido ('' quebrava a coluna UUID)
-  let targetCompanyId: string | null =
-    typeof companyId === 'string' && companyId.trim() ? companyId.trim() : null;
-
-  if (targetCompanyId && !UUID_REGEX.test(targetCompanyId)) {
-    return res.status(400).json({ error: 'Empresa inválida.' });
-  }
+  // Cadastro público NUNCA aceita company_id do frontend: cada registro cria
+  // sua própria unidade. Vínculo a empresa existente é feito pelo ADM.
+  let targetCompanyId: string | null = null;
 
   const normalizedEmail = email.trim().toLowerCase();
 
