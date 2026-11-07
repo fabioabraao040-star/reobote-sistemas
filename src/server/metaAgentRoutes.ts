@@ -10,7 +10,7 @@
 //
 // Frontend não recebe secrets, tokens, telefone de consumidor nem URL da Meta.
 
-import { Router, type Response } from 'express';
+import { Router, type NextFunction, type Response } from 'express';
 import type { AuthenticatedRequest } from './authMiddleware.js';
 import { adminOnlyMiddleware } from './authMiddleware.js';
 import type { MetaAgentService } from './metaAgentService.js';
@@ -19,16 +19,23 @@ export interface MetaAgentRouterDependencies {
   service: MetaAgentService;
 }
 
+// Defesa em profundidade: nenhuma rota (GET ou POST) pode operar sem empresa
+// vinculada. Sem isso, um ADM com company_id nulo poderia alcançar a
+// configuração global do WhatsApp e o escopo de outra empresa.
+function companyScopeMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.authCompanyId) {
+    return res.status(400).json({ error: 'Seu usuário não está vinculado a uma empresa.' });
+  }
+  next();
+}
+
 export function createMetaAgentRouter(deps: MetaAgentRouterDependencies): Router {
   const router = Router();
-  router.use(adminOnlyMiddleware);
+  router.use(adminOnlyMiddleware, companyScopeMiddleware);
 
   router.get('/', async (req: AuthenticatedRequest, res: Response) => {
-    if (!req.authCompanyId) {
-      return res.status(400).json({ error: 'Seu usuário não está vinculado a uma empresa.' });
-    }
-    const view = await deps.service.getView(req.authCompanyId, { refresh: true });
-    const events = await deps.service.listRecentEvents(req.authCompanyId, 20);
+    const view = await deps.service.getView(req.authCompanyId!, { refresh: true });
+    const events = await deps.service.listRecentEvents(req.authCompanyId!, 20);
     return res.json({
       integration: view.integration,
       live: view.live,

@@ -102,6 +102,31 @@ function detailOf(
   return 'Falha de rede ao contatar a Meta.';
 }
 
+type MetaCallErrorLike = {
+  error?: { status: number; title: string; detail: string; code: string | null } | null;
+  networkError?: string;
+};
+
+// Código de evento observável e sanitizado: preserva HTTP status, código e
+// título da Meta sem gravar detalhes potencialmente sensíveis ou o token.
+function sanitizeEventCode(value: unknown, max = 30): string {
+  return String(value ?? '')
+    .replace(/[^0-9A-Za-z_.:-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, max);
+}
+
+function metaErrorCode(result: MetaCallErrorLike): string | null {
+  if (result.networkError) {
+    return `network:${sanitizeEventCode(result.networkError) || 'unknown'}`;
+  }
+  if (!result.error) return null;
+  const status = Number.isFinite(result.error.status) ? result.error.status : 'na';
+  const code = result.error.code ? sanitizeEventCode(result.error.code) : 'none';
+  const title = result.error.title ? sanitizeEventCode(result.error.title) : '';
+  return `http:${status};code:${code}${title ? `;title:${title}` : ''}`;
+}
+
 export function createMetaAgentService(deps: MetaAgentServiceDependencies): MetaAgentService {
   const store = deps.store;
 
@@ -149,7 +174,7 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
         integrationId: integration.id,
         eventType: 'settings_read',
         outcome: 'failed',
-        errorCode: response.error?.code ?? response.networkError ?? null,
+        errorCode: metaErrorCode(response),
       });
       return { kind: 'meta-error', detail: detailOf(response) };
     }
@@ -182,15 +207,14 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
     return { kind: 'ok', settings: match };
   }
 
-  function mapStatusAfterSettings(current: MetaAgentStatus, rolloutEnabled: boolean): MetaAgentStatus {
+  function mapStatusAfterSettings(current: MetaAgentStatus): MetaAgentStatus {
     // connected = agente existe e foi confirmado por leitura real.
     // disabled   = REOBOTE desativou explicitamente (persistido).
-    // pending    = ainda sem agente confirmado. error = última ação falhou.
-    if (rolloutEnabled) return 'connected';
-    if (current === 'disabled') return 'disabled';
-    if (current === 'pending') return 'pending';
-    if (current === 'error') return 'error';
-    return 'connected';
+    // pending    = ainda sem agente confirmado (não passa por settings read).
+    // error      = última ação falhou, mas uma leitura confirmada recupera o estado.
+    // Qualquer settings read confirmado prova que o agente existe; somente uma
+    // desativação explícita do REOBOTE é preservada.
+    return current === 'disabled' ? 'disabled' : 'connected';
   }
 
   async function getView(companyId: string, opts?: { refresh?: boolean }): Promise<MetaAgentView> {
@@ -240,9 +264,7 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
 
     // A elegibilidade é consultável mesmo antes dos termos serem aceitos.
     const eligibility = await client.getEligibility(config.phoneNumberId);
-    const eligibilityErrorCode = eligibility.ok
-      ? null
-      : eligibility.error?.code ?? eligibility.networkError ?? null;
+    const eligibilityErrorCode = eligibility.ok ? null : metaErrorCode(eligibility);
     view.live.isEligible = eligibility.ok ? eligibility.data.isEligible : null;
     if (!eligibility.ok) {
       await store.recordEvent({
@@ -275,7 +297,7 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
     const settings = sync?.kind === 'ok' ? sync.settings : null;
     if (settings) {
       const effectiveAgentId = settings.agentId || integration.metaAgentId;
-      const nextStatus = mapStatusAfterSettings(integration.status, settings.rollout.enabled);
+      const nextStatus = mapStatusAfterSettings(integration.status);
       const refresh = {
         id: integration.id,
         status: nextStatus,
@@ -381,9 +403,9 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
           integrationId: integration.id,
           eventType: 'eligibility',
           outcome: 'failed',
-          errorCode: eligibility.error?.code ?? eligibility.networkError ?? null,
+          errorCode: metaErrorCode(eligibility),
         });
-        return { ok: false, agentId: null, status: 'error', message: detailOf(eligibility), view: await currentView(companyId) };
+        return { ok: false, agentId: null, status: 'error', message: detailOf(eligibility), view: await getView(companyId) };
       }
       await store.recordEvent({
         integrationId: integration.id,
@@ -399,25 +421,26 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
           status: 'pending',
           message:
             'A Meta informa que este número não é elegível (verifique vertical, país, termo do Meta Business Agent e banimento).',
-          view: await currentView(companyId),
+          view: await getView(companyId),
         };
       }
 
       const onboarding = await client.onboard(config.phoneNumberId);
       if (!onboarding.ok) {
         const errorCode = onboarding.error?.code ?? onboarding.networkError ?? null;
+        const eventCode = metaErrorCode(onboarding);
         await store.setStatus(integration.id, 'error');
         await store.recordEvent({
           integrationId: integration.id,
           eventType: 'onboarding',
           outcome: 'failed',
-          errorCode,
+          errorCode: eventCode,
         });
         const message =
           errorCode === META_TOS_ERROR_CODE
             ? 'Os Termos de Serviço do Meta Business Agent ainda não foram aceitos no WhatsApp Manager.'
             : detailOf(onboarding);
-        return { ok: false, agentId: null, status: 'error', message, view: await currentView(companyId) };
+        return { ok: false, agentId: null, status: 'error', message, view: await getView(companyId) };
       }
 
       const agentId = onboarding.data.agentId;
@@ -434,7 +457,7 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
           agentId: null,
           status: 'error',
           message: 'A Meta aceitou o onboarding mas não devolveu o identificador do agente.',
-          view: await currentView(companyId),
+          view: await getView(companyId),
         };
       }
 
@@ -483,7 +506,7 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
         };
       }
 
-      const status = mapStatusAfterSettings('connected', confirmedSettings.rollout.enabled);
+      const status = mapStatusAfterSettings('connected');
       await store.setStatus(integration.id, status);
 
       // Regras de atendimento (§7): skill padrão REOBOTE, best-effort. Falha na
@@ -498,9 +521,7 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
         },
         integration.metaAgentId,
       );
-      const skillErrorCode = skillResult.ok
-        ? null
-        : skillResult.error?.code ?? skillResult.networkError ?? null;
+      const skillErrorCode = skillResult.ok ? null : metaErrorCode(skillResult);
       await store.recordEvent({
         integrationId: integration.id,
         eventType: 'skill_create',
@@ -542,12 +563,12 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
           integrationId: integration.id,
           eventType: enabled ? 'enable' : 'disable',
           outcome: 'failed',
-          errorCode: update.error?.code ?? update.networkError ?? null,
+          errorCode: metaErrorCode(update),
         });
         const billingHint = enabled && update.error?.code === '400'
           ? ' A Meta exige método de pagamento anexado para ativar para todos os públicos (ai_audience = EVERYONE).'
           : '';
-        return { ok: false, message: detailOf(update) + billingHint, view: await currentView(companyId) };
+        return { ok: false, message: detailOf(update) + billingHint, view: await getView(companyId) };
       }
 
       const confirmed = update.data.find((item) => item.agentId === integration.metaAgentId) ?? update.data[0] ?? null;
@@ -610,7 +631,7 @@ export function createMetaAgentService(deps: MetaAgentServiceDependencies): Meta
           integrationId: integration.id,
           eventType: 'handoff_release',
           outcome: 'failed',
-          errorCode: result.error?.code ?? result.networkError ?? null,
+          errorCode: metaErrorCode(result),
         });
         return { ok: false, message: detailOf(result), requestId: null };
       }

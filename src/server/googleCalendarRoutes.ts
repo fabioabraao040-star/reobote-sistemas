@@ -17,7 +17,7 @@ export interface GoogleCalendarRouterDependencies {
 export function createGoogleCalendarRouter(deps: GoogleCalendarRouterDependencies): Router {
   const router = Router();
 
-  router.get('/connect', adminOnlyMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  router.post('/connect', adminOnlyMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     if (!req.authCompanyId || !req.authUserId) {
       return res.status(400).json({ error: 'Usuário sem empresa vinculada.' });
     }
@@ -25,7 +25,9 @@ export function createGoogleCalendarRouter(deps: GoogleCalendarRouterDependencie
     if (!url) {
       return res.status(503).json({ error: 'Google Calendar não configurado no servidor.' });
     }
-    return res.redirect(url);
+    // A URL é gerada exclusivamente pelo serviço (state assinado). O frontend
+    // recebe a URL pronta e faz a navegação, sem montar parâmetros OAuth.
+    return res.json({ url });
   });
 
   router.get('/callback', async (req: AuthenticatedRequest, res: Response) => {

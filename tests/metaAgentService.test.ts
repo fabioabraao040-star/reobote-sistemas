@@ -350,7 +350,10 @@ test('setRollout: 400 por falta de método de pagamento aparece no aviso ao ADM'
   );
   assert.equal(putCalls.length, 1);
   assert.deepEqual(putCalls[0].body, { rollout: { enabled: true } });
-  assert.ok(harness.events.some((event) => event.eventType === 'enable' && event.outcome === 'failed'));
+  const failure = harness.events.find((event) => event.eventType === 'enable' && event.outcome === 'failed');
+  assert.ok(failure);
+  assert.match(failure.errorCode ?? '', /http:400/);
+  assert.match(failure.errorCode ?? '', /code:400/);
   assert.equal(harness.getIntegrationRow()?.status, 'error');
 });
 
@@ -392,4 +395,61 @@ test('setRollout: desativar registra disabled e evento ok', async () => {
   assert.equal(result.ok, true);
   assert.equal(harness.getIntegrationRow()?.status, 'disabled');
   assert.ok(harness.events.some((event) => event.eventType === 'disable' && event.outcome === 'ok'));
+});
+
+test('verify: leitura real confirmada recupera status error para connected', async () => {
+  const harness = makeService((call) => {
+    if (call.url.includes('agent_eligibility')) return { status: 200, body: { is_eligible: true } };
+    return {
+      status: 200,
+      body: [
+        {
+          agent_id: 'AGENT-ERR',
+          channel: 'whatsapp',
+          rollout: { enabled: false },
+          handoff: null,
+          ai_audience: 'EVERYONE',
+        },
+      ],
+    };
+  });
+
+  const created = await harness.store.createIntegration(COMPANY, 'config-1');
+  assert.ok(created.data);
+  await harness.store.setMetaAgentId(created.data.id, 'AGENT-ERR', 'error');
+  assert.equal(harness.getIntegrationRow()?.status, 'error');
+
+  const result = await harness.service.verify(COMPANY);
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.getIntegrationRow()?.status, 'connected');
+  assert.equal(result.view?.integration?.status, 'connected');
+});
+
+test('verify: desativação explícita pelo REOBOTE permanece disabled após leitura real', async () => {
+  const harness = makeService((call) => {
+    if (call.url.includes('agent_eligibility')) return { status: 200, body: { is_eligible: true } };
+    return {
+      status: 200,
+      body: [
+        {
+          agent_id: 'AGENT-OFF',
+          channel: 'whatsapp',
+          rollout: { enabled: false },
+          handoff: null,
+          ai_audience: 'EVERYONE',
+        },
+      ],
+    };
+  });
+
+  const created = await harness.store.createIntegration(COMPANY, 'config-1');
+  assert.ok(created.data);
+  await harness.store.setMetaAgentId(created.data.id, 'AGENT-OFF', 'disabled');
+
+  const result = await harness.service.verify(COMPANY);
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.getIntegrationRow()?.status, 'disabled');
+  assert.equal(result.view?.integration?.status, 'disabled');
 });

@@ -220,8 +220,28 @@ export const api = {
     return data;
   },
   async connectGoogleCalendar() {
-    // Redireciona o navegador para o fluxo OAuth do Google.
-    window.location.href = '/api/google-calendar/connect';
+    // Solicita ao backend autenticado a URL OAuth já montada com state assinado.
+    const res = await fetch('/api/google-calendar/connect', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({}),
+    });
+    const data = await parseJson(res);
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao iniciar conexão com o Google Calendar.');
+    }
+
+    let authUrl: URL;
+    try {
+      authUrl = new URL(String(data.url));
+    } catch {
+      throw new Error('URL de conexão do Google Calendar inválida.');
+    }
+    if (authUrl.protocol !== 'https:') {
+      throw new Error('URL de conexão do Google Calendar inválida.');
+    }
+
+    window.location.assign(authUrl.toString());
   },
   async disconnectGoogleCalendar() {
     const res = await fetch('/api/google-calendar/disconnect', {

@@ -38,6 +38,17 @@ export default function GoogleCalendarIntegration() {
     }
   }
 
+  async function connect() {
+    setBusy('connect');
+    setNotice(null);
+    try {
+      await api.connectGoogleCalendar();
+    } catch (e: any) {
+      setNotice(e?.message || 'Falha ao iniciar a conexão com o Google Calendar.');
+      setBusy(null);
+    }
+  }
+
   const connected = status?.connected === true;
 
   return (
@@ -74,10 +85,11 @@ export default function GoogleCalendarIntegration() {
           {!connected && (
             <button
               type="button"
-              onClick={() => api.connectGoogleCalendar()}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#D0B783] text-[#26333B] cursor-pointer"
+              onClick={connect}
+              disabled={busy === 'connect'}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#D0B783] text-[#26333B] cursor-pointer disabled:opacity-40"
             >
-              Conectar Google Calendar
+              {busy === 'connect' ? 'Conectando…' : 'Conectar Google Calendar'}
             </button>
           )}
           {connected && (

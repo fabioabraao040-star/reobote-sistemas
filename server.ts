@@ -33,6 +33,8 @@ import { createGoogleCalendarRouter } from './src/server/googleCalendarRoutes.js
 import { createGoogleCalendarService } from './src/server/googleCalendarService.js';
 import { createGoogleCalendarStore } from './src/server/googleCalendarStore.js';
 import { verifyState as verifyGoogleState } from './src/server/googleCalendarCrypto.js';
+import { createGeminiService } from './src/server/geminiService.js';
+import { createGeminiRouter } from './src/server/geminiRoutes.js';
 
 dotenv.config();
 
@@ -394,7 +396,8 @@ const metaAgentService = createMetaAgentService({
   },
 });
 
-app.use('/api/meta-agent', authMiddleware, createMetaAgentRouter({ service: metaAgentService }));
+// Meta Agent ficará FORA DA OPERAÇÃO - rota comentada.
+// app.use('/api/meta-agent', authMiddleware, createMetaAgentRouter({ service: metaAgentService }));
 
 // ============================================================================
 // GOOGLE CALENDAR OAUTH 2.0 (somente ADM operacional)
@@ -414,6 +417,49 @@ const googleCalendarService = createGoogleCalendarService({
     process.env.GOOGLE_CALENDAR_ID?.trim() ||
     '4243247178dc52a99520497e277bb3b57149384fac1a9f181341d142471efbb3@group.calendar.google.com',
   getTimeZone: () => 'America/Sao_Paulo',
+});
+
+// ============================================================================
+// GEMINI — IA PRINCIPAL DE ATENDIMENTO (somente ADM operacional)
+// ============================================================================
+const geminiService = createGeminiService({
+  store: {
+    async getConfig() {
+      const { data, error } = await supabase!
+        .from('emergency_ai_configs')
+        .select('enabled, provider, model, integration_status')
+        .is('company_id', null)
+        .maybeSingle();
+      return { data: (data as { enabled: boolean; provider: string | null; model: string | null; integration_status: string } | null) ?? null, error: error ? { message: error.message } : null };
+    },
+    async recordGenerationFailure() {
+      // Registro de falha de geração (best-effort, não bloqueia o atendimento)
+      try {
+        await supabase!.from('emergency_ai_events').insert({
+          event_type: 'generation_failed',
+          outcome: 'failed',
+          error_code: 'provider_error',
+        });
+      } catch {
+        // Silencioso: não impede o atendimento humano
+      }
+    },
+    async recordAIResponse() {
+      // Registro de resposta da IA (best-effort)
+      try {
+        await supabase!.from('emergency_ai_events').insert({
+          event_type: 'ai_response',
+          outcome: 'ok',
+          error_code: null,
+        });
+      } catch {
+        // Silencioso: não impede o atendimento humano
+      }
+    },
+  },
+  logger: {
+    error: (...args) => console.error('[Gemini]', ...args),
+  },
 });
 
 // Callback público do OAuth (redirect do Google).
@@ -447,6 +493,8 @@ app.use('/api/google-calendar', authMiddleware, createGoogleCalendarRouter({
   verifyStateFn: verifyGoogleState,
   getAppUrl: () => (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, ''),
 }));
+
+app.use('/api/gemini-ai', authMiddleware, createGeminiRouter(geminiService));
 
 // 1. WhatsApp Official Meta API Configuration (Admin Only)
 app.get('/api/whatsapp/config', authMiddleware, masterAdminOnlyMiddleware, async (req, res) => {
@@ -713,8 +761,11 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
 
   const appSecret = process.env.WHATSAPP_APP_SECRET;
   if (!appSecret) {
-    console.error('[Webhook] WHATSAPP_APP_SECRET não configurado.');
-    return res.status(500).send('Erro interno.');
+    console.warn(
+      "[Webhook] WHATSAPP_APP_SECRET não configurado. Verificação de assinatura HMAC desativada. " +
+      "Configure WHATSAPP_APP_SECRET para produção."
+    );
+    return res.status(200).send('EVENT_RECEIVED');
   }
 
   const rawBody = req.body;
@@ -823,7 +874,7 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
         for (const inbound of inboundMessages) {
           // O Meta webhook disponibiliza o phone_number_id do número receptor
           // nos metadados da mensagem recebida.
-          const metadata = inbound.metadata;
+          const metadata = value.metadata;
           if (metadata && metadata.phone_number_id) {
             eventPhoneNumberId = metadata.phone_number_id;
             break;
@@ -866,8 +917,18 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
 
     // Obter company_id e businessPhone da configuração validada.
     // Já validamos que phoneCfg existe e tem is_verified, access_token, phone_number_id.
-    // company_id deve existir pois viemos de uma configuração válida da WhatsApp.
-    const companyId = phoneCfg.company_id!;
+    // company_id vem do vínculo real da configuração WhatsApp com a empresa.
+    // Não há fallback para a "primeira empresa": sem vínculo válido, a mensagem
+    // é descartada com 200 EVENT_RECEIVED para evitar reprocessamento pela Meta,
+    // mas nenhum dado é gravado associado à empresa errada.
+    const companyId = phoneCfg.company_id;
+    if (!companyId) {
+      console.error(
+        '[Meta Webhook] Configuração WhatsApp sem company_id vinculado para phone_number_id:',
+        phoneCfg.phone_number_id,
+      );
+      return res.status(200).send('EVENT_RECEIVED');
+    }
     businessPhone = String(phoneCfg.phone_number || '').replace(/\D/g, '');
 
     // Validar se a configuração está completamente configurada para envio.
@@ -1014,6 +1075,56 @@ app.post('/api/webhook/whatsapp', async (req, res) => {
               unread_count: isNewConversation ? 1 : (existingConv?.unread_count || 0) + 1,
             })
             .eq('id', conversationId);
+
+          // ====================================================================
+          // GEMINI — RESPOSTA AUTOMÁTICA DE ATENDIMENTO (apenas mensagens de texto)
+          // ====================================================================
+          // Só processa mensagens de texto do cliente. Não responde mensagens
+          // do sistema, notas internas ou conteúdos não-textuais.
+          if (inbound?.type === 'text' && conversationId) {
+            try {
+              const geminiStatus = await geminiService.getStatus();
+              if (geminiStatus.enabled) {
+                const aiResult = await geminiService.generateResponse({
+                  conversationId,
+                  customerMessage: content,
+                  companyId,
+                  timeoutMs: 10000,
+                });
+
+                if (aiResult.error) {
+                  console.error(
+                    '[Gemini] Falha na geração:',
+                    aiResult.errorCode,
+                    aiResult.error,
+                  );
+                } else if (aiResult.text) {
+                  // Envia a resposta da IA pelo WhatsApp
+                  const dispatchResult = await dispatchWhatsAppText({
+                    phoneNumberId: phoneCfg.phone_number_id,
+                    accessToken: phoneCfg.access_token,
+                    to: from,
+                    body: aiResult.text,
+                  });
+
+                  if (dispatchResult.ok && dispatchResult.messageId) {
+                    await supabase
+                      .from('messages')
+                      .insert({
+                        conversation_id: conversationId,
+                        sender_type: 'agent',
+                        sender_id: null,
+                        content: aiResult.text,
+                        status: 'sent',
+                        whatsapp_message_id: dispatchResult.messageId,
+                      });
+                  }
+                }
+              }
+            } catch (geminiErr) {
+              console.error('[Gemini] Erro ao processar mensagem:', geminiErr);
+            }
+          }
         }
 
         // Atualizações de entrega/leitura das mensagens enviadas
@@ -2752,130 +2863,17 @@ app.post('/api/auth/reset-password/confirm', async (req, res) => {
 
 
 // ============================================================================
-// DIAGNÓSTICO TEMPORÁRIO (removido após a validação)
+// DIAGNÓSTICO TEMPORÁRIO — DESATIVADO EM PRODUÇÃO
 // ============================================================================
-app.get('/api/diag', async (req, res) => {
-  const expected = process.env.DIAG_TOKEN || '';
-  const provided = req.header('x-diag-token') || '';
-  const providedBuffer = Buffer.from(provided);
-  const expectedBuffer = Buffer.from(expected);
-  const ok =
-    expected.length > 0 &&
-    providedBuffer.length === expectedBuffer.length &&
-    crypto.timingSafeEqual(providedBuffer, expectedBuffer);
-
-  if (!ok) {
-    return res.status(404).json({ error: 'Rota da API não encontrada.' });
-  }
-
-  if (!supabase) {
-    return res.status(500).json({ error: 'Supabase não configurado (SUPABASE_URL/SERVICE_ROLE ausentes).' });
-  }
-
-  const supaUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  const rest = await fetch(`${supaUrl}/rest/v1/`, {
-    headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` },
-  });
-  const body: any = await rest.json().catch(() => ({}));
-  const schemas = body?.components?.schemas || body?.definitions || {};
-  const tables: string[] = Object.keys(schemas).sort();
-
-  const counts: Record<string, number | null> = {};
-  for (const t of tables) {
-    const cr = await fetch(`${supaUrl}/rest/v1/${t}?select=id`, {
-      headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Prefer: 'count=exact', Range: '0-0' },
-    });
-    const range = cr.headers.get('content-range') || '';
-    const total = range.split('/')[1];
-    // '*/*' => contagem desconhecida no PostgREST; reportamos null, não 0.
-    counts[t] = /^\d+$/.test(total) ? Number(total) : null;
-  }
-
-  return res.json({
-    host: supaUrl.replace(/^https?:\/\//, ''),
-    restStatus: rest.status,
-    restError: rest.ok ? null : body?.message || body?.hint || body?.error || null,
-    tables,
-    counts,
-    hasCompanies: tables.includes('companies'),
-  });
+// As rotas /api/diag e /api/diag/create-admin foram desativadas pois expõem
+// estrutura interna do banco e permitem criação indevida de administrador.
+// Não existem rotas de diagnóstico ativas neste projeto.
+app.get('/api/diag', async (_req, res) => {
+  return res.status(404).json({ error: 'Rota da API não encontrada.' });
 });
 
-// Cria o ADM real (temporário, protegido pelo mesmo token)
-app.post('/api/diag/create-admin', async (req, res) => {
-  const expected = process.env.DIAG_TOKEN || '';
-  const provided = req.header('x-diag-token') || '';
-  const providedBuffer = Buffer.from(provided);
-  const expectedBuffer = Buffer.from(expected);
-  const ok =
-    expected.length > 0 &&
-    providedBuffer.length === expectedBuffer.length &&
-    crypto.timingSafeEqual(providedBuffer, expectedBuffer);
-
-  if (!ok) {
-    return res.status(404).json({ error: 'Rota da API não encontrada.' });
-  }
-
-  if (!supabase) {
-    return res.status(500).json({ error: 'Supabase não configurado.' });
-  }
-
-  const { email, password, name, companyName } = req.body || {};
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'Informe email, password e name.' });
-  }
-  if (String(password).length < 8) {
-    return res.status(400).json({ error: 'A senha precisa ter no mínimo 8 caracteres.' });
-  }
-
-  const normalizedEmail = String(email).trim().toLowerCase();
-
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-    email: normalizedEmail,
-    password: String(password),
-    email_confirm: true,
-    user_metadata: { name: String(name).trim(), role: 'admin' },
-  });
-
-  if (authError || !authData.user) {
-    return res.status(400).json({ error: authError?.message || 'Erro ao criar login.' });
-  }
-
-  const { data: company, error: companyError } = await supabase
-    .from('companies')
-    .insert({ name: String(companyName || 'Reobote').trim() })
-    .select('id, name')
-    .single();
-
-  if (companyError || !company) {
-    await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
-    return res.status(500).json({ error: companyError?.message || 'Erro ao criar empresa.' });
-  }
-
-  const { error: profileError } = await supabase.from('users').insert({
-    id: authData.user.id,
-    company_id: company.id,
-    name: String(name).trim(),
-    email: normalizedEmail,
-    role: 'admin',
-    status: 'offline',
-  });
-
-  if (profileError) {
-    await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
-    await supabase.from('companies').delete().eq('id', company.id);
-    return res.status(500).json({ error: profileError.message || 'Erro ao criar perfil ADM.' });
-  }
-
-  return res.status(201).json({
-    ok: true,
-    email: normalizedEmail,
-    userId: authData.user.id,
-    companyId: company.id,
-    companyName: company.name,
-    role: 'admin',
-  });
+app.post('/api/diag/create-admin', async (_req, res) => {
+  return res.status(404).json({ error: 'Rota da API não encontrada.' });
 });
 
 // Rotas /api não encontradas devem responder JSON (nunca o HTML do SPA)

@@ -21,6 +21,13 @@ const PROFILES = {
     email: 'admin@test.invalid',
     role: 'admin',
   },
+  'admin-nocompany-token': {
+    id: 'admin-nocompany-id',
+    company_id: null,
+    name: 'Administrador Sem Empresa',
+    email: 'admin-nocompany@test.invalid',
+    role: 'admin',
+  },
   'user-token': {
     id: 'user-id',
     company_id: COMPANY,
@@ -213,6 +220,38 @@ test('sem autenticação responde 401 e atendente/master recebem 403', async () 
       const data = await response.json();
       assert.equal(typeof data.error, 'string');
       assert.ok(!JSON.stringify(data).includes(SECRET_TOKEN));
+    }
+  });
+});
+
+test('ADM sem empresa é bloqueado com 400 em todas as rotas operacionais', async () => {
+  const stub = (async () => {
+    throw new TypeError('não deve chamar a Meta');
+  }) as unknown as typeof fetch;
+
+  await withServer(makeApp({ fetchStub: stub }), async (baseUrl) => {
+    const routes = [
+      ['/api/meta-agent', 'GET'],
+      ['/api/meta-agent/events', 'GET'],
+      ['/api/meta-agent/connect', 'POST'],
+      ['/api/meta-agent/enable', 'POST'],
+      ['/api/meta-agent/disable', 'POST'],
+      ['/api/meta-agent/verify', 'POST'],
+      ['/api/meta-agent/handoff/release', 'POST'],
+    ] as const;
+
+    for (const [path, method] of routes) {
+      const response = await request(baseUrl, path, {
+        token: 'admin-nocompany-token',
+        method,
+        body:
+          method === 'POST'
+            ? { conversationId: '22222222-2222-2222-2222-222222222222' }
+            : undefined,
+      });
+      assert.equal(response.status, 400, `${method} ${path} deveria exigir empresa`);
+      const data = await response.json();
+      assert.ok(String(data.error).includes('não está vinculado'));
     }
   });
 });
